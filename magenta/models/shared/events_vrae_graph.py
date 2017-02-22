@@ -112,7 +112,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
 
         encoder_initial_state = encoder_cell.zero_state(hparams.batch_size, tf.float32)
 
-        # we don't need outputs TODO alter so it doesn't even output stuff?
+        # TODO alter so it doesn't output stuff?
         _, encoder_final_state = tf.nn.dynamic_rnn(
             encoder_cell, inputs, initial_state=encoder_initial_state, parallel_iterations=1,
             swap_memory=True)
@@ -136,8 +136,8 @@ def build_graph(mode, config, sequence_example_file_paths=None):
         decoder_h0 = []
         
         # sample z using reparameterization trick, do this batch_size times.
-        # TODO efficiency...
-        # TODO alter depending on if state is tuple...
+        # TODO efficiency
+        # TODO alter depending on state_is_tuple
         for c, h in decoder_cell.zero_state(hparams.batch_size, dtype=tf.float32):
             epsilon = tf.random_normal(tf.shape(z_logvar), 0, 1, dtype=tf.float32)
             z = z_mu + tf.mul(tf.sqrt(tf.exp(z_logvar)), epsilon)

@@ -18,13 +18,13 @@ import tensorflow as tf
 import magenta
 
 from magenta.models.shared import events_vrae_graph
-from magenta.models.shared import events_rnn_model
+from magenta.models.shared import events_vrae_model
 
 
 class EventSequenceRNNGraphTest(tf.test.TestCase):
 
   def setUp(self):
-    self.config = events_rnn_model.EventSequenceRnnConfig(
+    self.config = events_vrae_model.EventSequenceRnnConfig(
         None,
         magenta.music.OneHotEventSequenceEncoderDecoder(
             magenta.music.testing_lib.TrivialOneHotEncoding(12)),
