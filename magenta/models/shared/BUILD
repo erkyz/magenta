@@ -46,6 +46,28 @@ py_test(
 )
 
 py_library(
+    name = "events_vrae_graph",
+    srcs = ["events_vrae_graph.py"],
+    srcs_version = "PY2AND3",
+    deps = [
+        "//magenta",
+        # tensorflow dep
+    ],
+)
+
+py_test(
+    name = "events_vrae_graph_test",
+    srcs = ["events_vrae_graph_test.py"],
+    srcs_version = "PY2AND3",
+    deps = [
+        ":events_vrae_graph",
+        ":events_rnn_model",
+        "//magenta",
+        # tensorflow dep
+    ],
+)
+
+py_library(
     name = "events_rnn_model",
     srcs = ["events_rnn_model.py"],
     srcs_version = "PY2AND3",
