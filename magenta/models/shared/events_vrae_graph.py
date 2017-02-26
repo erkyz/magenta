@@ -17,7 +17,8 @@
 import tensorflow as tf
 import magenta
 
-TEMP_LATENT_SIZE = 64
+TEMP_LATENT_SIZE = 5
+# TEMP_HIDDEN_SIZE = 64
 
 def make_rnn_cell(rnn_layer_sizes,
                   dropout_keep_prob=1.0,
@@ -101,14 +102,14 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       # performance. However, during generation, the RNN cell state is fed
       # back into the graph with a feed dict. Feed dicts require passed in
       # values to be tensors and not tuples, so state_is_tuple is set to False.
+      # TODO this is hacky af. also where is this happening?
       state_is_tuple = False
-
 
     with tf.variable_scope('encoder'):
         encoder_cell = make_rnn_cell(hparams.rnn_layer_sizes,
                          dropout_keep_prob=hparams.dropout_keep_prob,
-                         attn_length=0,
-                         state_is_tuple=state_is_tuple)
+                         attn_length=0, # do not use attention on the encoder
+                         state_is_tuple=True)
 
         encoder_initial_state = encoder_cell.zero_state(hparams.batch_size, tf.float32)
 
@@ -117,10 +118,8 @@ def build_graph(mode, config, sequence_example_file_paths=None):
             encoder_cell, inputs, initial_state=encoder_initial_state, parallel_iterations=1,
             swap_memory=True)
 
-        # TODO multi-layer
         # We only look at the cell state of the last layer of the encoder LSTM
-        # need a z for each input in the batch.
-        encoder_final_cell_state = encoder_final_state[-1][0]
+        encoder_final_cell_state = encoder_final_state[-1].c
         z_mu = tf.contrib.layers.fully_connected(encoder_final_cell_state, 
                 num_outputs=TEMP_LATENT_SIZE, activation_fn=None, trainable=True)
         z_logvar = tf.contrib.layers.fully_connected(encoder_final_cell_state, 
@@ -128,27 +127,42 @@ def build_graph(mode, config, sequence_example_file_paths=None):
 
     # decoder
     with tf.variable_scope('decoder'):
+        # TODO attention
         decoder_cell = make_rnn_cell(hparams.rnn_layer_sizes,
                              dropout_keep_prob=hparams.dropout_keep_prob,
                              attn_length=hparams.attn_length,
                              state_is_tuple=state_is_tuple)
-
-        decoder_h0 = []
         
-        # sample z using reparameterization trick, do this batch_size times.
-        # TODO efficiency
-        # TODO alter depending on state_is_tuple
-        for c, h in decoder_cell.zero_state(hparams.batch_size, dtype=tf.float32):
-            epsilon = tf.random_normal(tf.shape(z_logvar), 0, 1, dtype=tf.float32)
-            z = z_mu + tf.mul(tf.sqrt(tf.exp(z_logvar)), epsilon)
+        # sample z using reparameterization trick
+        if state_is_tuple:
+            decoder_h0 = []
+            for c, h in decoder_cell.zero_state(hparams.batch_size, dtype=tf.float32):
+                # TODO each layer should  have its own z_mu, z_logvar
+                epsilon = tf.random_normal(tf.shape(z_logvar), 0, 1, dtype=tf.float32)
+                z = z_mu + tf.mul(tf.sqrt(tf.exp(z_logvar)), epsilon)
+                h_state = tf.contrib.layers.fully_connected(z, 
+                        num_outputs=hparams.rnn_layer_sizes[0], # TODO should be i
+                        trainable=True)
+                decoder_h0.append(tf.nn.rnn_cell.LSTMStateTuple(c, h_state))
+            decoder_h0 = tuple(decoder_h0)
+        else:
+            # take z_mu, z_logvar from last batch input since batch_size is 1 for gen
+            epsilon = tf.random_normal(tf.shape(z_logvar[-1]), 0, 1, dtype=tf.float32)
+            z = z_mu[-1] + tf.mul(tf.sqrt(tf.exp(z_logvar[-1])), epsilon)
+            z = tf.reshape(z, [1, TEMP_LATENT_SIZE])
             h_state = tf.contrib.layers.fully_connected(z, 
-                    num_outputs=hparams.rnn_layer_sizes[1], 
+                    num_outputs=hparams.rnn_layer_sizes[0], 
                     trainable=True)
-            decoder_h0.append(tf.nn.rnn_cell.LSTMStateTuple(c, h_state))
+            decoder_h0 = decoder_cell.zero_state(hparams.batch_size, dtype=tf.float32)
+            mask1 = tf.pad(h_state, [[0,0], [hparams.rnn_layer_sizes[0], hparams.rnn_layer_sizes[1]*2]])
+            mask2 = tf.pad(h_state, [[0,0], [hparams.rnn_layer_sizes[0]*2, hparams.rnn_layer_sizes[1]]])
+            decoder_h0 += mask1 + mask2
 
         # Note: tf.reverse syntax unique to TF 0.12
+        # TODO does reverse still make sense in a Melody? continue goes backwards.
+        # TODO do you need <EOS>?
         outputs, final_state = tf.nn.dynamic_rnn(
-            decoder_cell, tf.reverse(inputs, [False, True, False]), initial_state=tuple(decoder_h0),
+            decoder_cell, tf.reverse(inputs, [False, False, True]), initial_state=decoder_h0,
             parallel_iterations=1, swap_memory=True)
 
     outputs_flat = tf.reshape(outputs, [-1, decoder_cell.output_size])
@@ -174,12 +188,14 @@ def build_graph(mode, config, sequence_example_file_paths=None):
 
       # "latent loss" -- KL divergence from N(0,I) 
       # TODO idk how this was derived exactly. what happened to det and trace?
-      kld = -0.5 * tf.reduce_sum(1 + z_logvar - tf.square(z_mu) - tf.exp(z_logvar), 1)
-      # "reconstruction loss": 
+      # this term should be larger. wanna do KL cost annealing or something.
+      kld = -100 * tf.reduce_sum(1 + z_logvar - tf.square(z_mu) - tf.exp(z_logvar), 1)
+      # "reconstruction loss" 
       reconstruction_loss = tf.reduce_sum(mask_flat * softmax_cross_entropy) / num_logits
       # VR lower bound -- cross entropy is equivalent to negative log likelihood.
       # average over batch
       loss = tf.reduce_mean(reconstruction_loss + kld)
+      # TODO regularize loss
       perplexity = (tf.reduce_sum(mask_flat * tf.exp(softmax_cross_entropy)) /
                     num_logits)
 
@@ -245,9 +261,11 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       softmax = tf.reshape(softmax_flat, [hparams.batch_size, -1, num_classes])
 
       tf.add_to_collection('inputs', inputs)
-      tf.add_to_collection('initial_state', initial_state)
+      tf.add_to_collection('initial_state', decoder_h0)
       tf.add_to_collection('final_state', final_state)
       tf.add_to_collection('temperature', temperature)
       tf.add_to_collection('softmax', softmax)
+      # tf.add_to_collection('z_logvar', z_logvar)
+      # tf.add_to_collection('z_mu', z_mu)
 
   return graph

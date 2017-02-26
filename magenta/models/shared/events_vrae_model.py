@@ -90,8 +90,11 @@ class EventSequenceRnnModel(mm.BaseModel):
     graph_final_state = self._session.graph.get_collection('final_state')[0]
     graph_softmax = self._session.graph.get_collection('softmax')[0]
     graph_temperature = self._session.graph.get_collection('temperature')
+    # graph_z_mu = self._session.graph.get_collection('z_mu')[-1]
+    # graph_z_logvar = self._session.graph.get_collection('z_logvar')[-1]
 
     feed_dict = {graph_inputs: inputs, graph_initial_state: initial_state}
+            # graph_z_mu: z_mu, graph_z_logvar: z_logvar}
     # For backwards compatibility, we only try to pass temperature if the
     # placeholder exists in the graph.
     if graph_temperature:
@@ -315,8 +318,10 @@ class EventSequenceRnnModel(mm.BaseModel):
       modify_events_callback(
           self._config.encoder_decoder, event_sequences, inputs)
 
+    graph_inputs = self._session.graph.get_collection('inputs')[0]
+    feed_dict = {graph_inputs: inputs}
     initial_state = np.tile(
-        self._session.run(graph_initial_state), (beam_size, 1))
+        self._session.run(graph_initial_state, feed_dict), (beam_size, 1))
     event_sequences, final_state, loglik = self._generate_branches(
         event_sequences, loglik, branch_factor, first_iteration_num_steps,
         inputs, initial_state, temperature)

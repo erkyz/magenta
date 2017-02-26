@@ -22,9 +22,9 @@ import time
 import tensorflow as tf
 import magenta
 
-from magenta.models.melody_rnn import melody_rnn_config_flags
-from magenta.models.melody_rnn import melody_rnn_model
-from magenta.models.melody_rnn import melody_rnn_sequence_generator
+from magenta.models.melody_vrae import melody_vrae_config_flags
+from magenta.models.melody_vrae import melody_vrae_model
+from magenta.models.melody_vrae import melody_vrae_sequence_generator
 from magenta.protobuf import generator_pb2
 from magenta.protobuf import music_pb2
 
@@ -50,7 +50,7 @@ tf.app.flags.DEFINE_string(
     'A short, human-readable text description of the bundle (e.g., training '
     'data, hyper parameters, etc.).')
 tf.app.flags.DEFINE_string(
-    'output_dir', '/tmp/melody_rnn/generated',
+    'output_dir', '/tmp/melody_vrae/generated',
     'The directory where MIDI files will be saved to.')
 tf.app.flags.DEFINE_integer(
     'num_outputs', 10,
@@ -236,9 +236,9 @@ def main(unused_argv):
   """Saves bundle or runs generator based on flags."""
   tf.logging.set_verbosity(FLAGS.log)
 
-  config = melody_rnn_config_flags.config_from_flags()
-  generator = melody_rnn_sequence_generator.MelodyRnnSequenceGenerator(
-      model=melody_rnn_model.MelodyRnnModel(config),
+  config = melody_vrae_config_flags.config_from_flags()
+  generator = melody_vrae_sequence_generator.MelodyRnnSequenceGenerator(
+      model=melody_vrae_model.MelodyVraeModel(config),
       details=config.details,
       steps_per_quarter=FLAGS.steps_per_quarter,
       checkpoint=get_checkpoint(),
