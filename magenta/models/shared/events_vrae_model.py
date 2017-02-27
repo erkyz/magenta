@@ -320,6 +320,9 @@ class EventSequenceRnnModel(mm.BaseModel):
 
     graph_inputs = self._session.graph.get_collection('inputs')[0]
     feed_dict = {graph_inputs: inputs}
+    graph_z_mu = self._session.graph.get_collection('z_mu')
+    z_mu = self._session.run(graph_z_mu, feed_dict)
+    print z_mu
     initial_state = np.tile(
         self._session.run(graph_initial_state, feed_dict), (beam_size, 1))
     event_sequences, final_state, loglik = self._generate_branches(

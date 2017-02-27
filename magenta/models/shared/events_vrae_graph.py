@@ -17,10 +17,12 @@
 import tensorflow as tf
 import magenta
 
-TEMP_LATENT_SIZE = 5
-# TEMP_HIDDEN_SIZE = 64
+TEMP_LATENT_SIZE = 10
+TEMP_HIDDEN_SIZE = 64
+TRAIN_BATCH_SIZE = 64 #TODO save properly
 
 def make_rnn_cell(rnn_layer_sizes,
+                  nlayers,
                   dropout_keep_prob=1.0,
                   attn_length=0,
                   base_cell=tf.nn.rnn_cell.BasicLSTMCell,
@@ -40,12 +42,15 @@ def make_rnn_cell(rnn_layer_sizes,
   Returns:
       A tf.contrib.rnn.MultiRNNCell based on the given hyperparameters.
   """
-  cells = []
+  cells, layer = [], 0
   for num_units in rnn_layer_sizes:
+    if layer == nlayers:
+        break
     cell = base_cell(num_units, state_is_tuple=state_is_tuple)
     cell = tf.nn.rnn_cell.DropoutWrapper(
         cell, output_keep_prob=dropout_keep_prob)
     cells.append(cell)
+    layer += 1
 
   cell = tf.nn.rnn_cell.MultiRNNCell(cells, state_is_tuple=state_is_tuple)
   if attn_length:
@@ -106,7 +111,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       state_is_tuple = False
 
     with tf.variable_scope('encoder'):
-        encoder_cell = make_rnn_cell(hparams.rnn_layer_sizes,
+        encoder_cell = make_rnn_cell(hparams.rnn_layer_sizes, 2,
                          dropout_keep_prob=hparams.dropout_keep_prob,
                          attn_length=0, # do not use attention on the encoder
                          state_is_tuple=True)
@@ -119,16 +124,17 @@ def build_graph(mode, config, sequence_example_file_paths=None):
             swap_memory=True)
 
         # We only look at the cell state of the last layer of the encoder LSTM
-        encoder_final_cell_state = encoder_final_state[-1].c
-        z_mu = tf.contrib.layers.fully_connected(encoder_final_cell_state, 
+        encoder_final_hidden_state = encoder_final_state[-1].h
+        z_mu = tf.contrib.layers.fully_connected(encoder_final_hidden_state, 
                 num_outputs=TEMP_LATENT_SIZE, activation_fn=None, trainable=True)
-        z_logvar = tf.contrib.layers.fully_connected(encoder_final_cell_state, 
+        z_logvar = tf.contrib.layers.fully_connected(encoder_final_hidden_state, 
                 num_outputs=TEMP_LATENT_SIZE, activation_fn=None, trainable=True)
 
     # decoder
     with tf.variable_scope('decoder'):
+        numDecodingLayers = len(hparams.rnn_layer_sizes)
         # TODO attention
-        decoder_cell = make_rnn_cell(hparams.rnn_layer_sizes,
+        decoder_cell = make_rnn_cell(hparams.rnn_layer_sizes, numDecodingLayers,
                              dropout_keep_prob=hparams.dropout_keep_prob,
                              attn_length=hparams.attn_length,
                              state_is_tuple=state_is_tuple)
@@ -136,27 +142,50 @@ def build_graph(mode, config, sequence_example_file_paths=None):
         # sample z using reparameterization trick
         if state_is_tuple:
             decoder_h0 = []
-            for c, h in decoder_cell.zero_state(hparams.batch_size, dtype=tf.float32):
-                # TODO each layer should  have its own z_mu, z_logvar
+            zero_state = decoder_cell.zero_state(hparams.batch_size, dtype=tf.float32)
+            zerostate = zero_state[0] if hparams.attn_length > 0 else zero_state
+            for c, h, in zerostate:
+                # TODO each layer should have its own z_mu, z_logvar?
                 epsilon = tf.random_normal(tf.shape(z_logvar), 0, 1, dtype=tf.float32)
                 z = z_mu + tf.mul(tf.sqrt(tf.exp(z_logvar)), epsilon)
-                h_state = tf.contrib.layers.fully_connected(z, 
-                        num_outputs=hparams.rnn_layer_sizes[0], # TODO should be i
+                hidden1 = tf.contrib.layers.fully_connected(z, 
+                        num_outputs=TEMP_HIDDEN_SIZE,
+                        trainable=True)
+                hidden2 = tf.contrib.layers.fully_connected(hidden1, 
+                        num_outputs=TEMP_HIDDEN_SIZE,
+                        trainable=True)
+                h_state = tf.contrib.layers.fully_connected(hidden2, 
+                        num_outputs=hparams.rnn_layer_sizes[len(decoder_h0)],
                         trainable=True)
                 decoder_h0.append(tf.nn.rnn_cell.LSTMStateTuple(c, h_state))
             decoder_h0 = tuple(decoder_h0)
+            if hparams.attn_length > 0:
+                decoder_h0 = (decoder_h0, zero_state[1], zero_state[2])
         else:
             # take z_mu, z_logvar from last batch input since batch_size is 1 for gen
             epsilon = tf.random_normal(tf.shape(z_logvar[-1]), 0, 1, dtype=tf.float32)
             z = z_mu[-1] + tf.mul(tf.sqrt(tf.exp(z_logvar[-1])), epsilon)
             z = tf.reshape(z, [1, TEMP_LATENT_SIZE])
-            h_state = tf.contrib.layers.fully_connected(z, 
+            hidden1 = tf.contrib.layers.fully_connected(z, 
+                    num_outputs=TEMP_HIDDEN_SIZE,
+                    trainable=True)
+            hidden2 = tf.contrib.layers.fully_connected(hidden1, 
+                    num_outputs=TEMP_HIDDEN_SIZE,
+                    trainable=True)
+            # this assumes that all the layer sizes are the same
+            h_state = tf.contrib.layers.fully_connected(hidden2, 
                     num_outputs=hparams.rnn_layer_sizes[0], 
                     trainable=True)
             decoder_h0 = decoder_cell.zero_state(hparams.batch_size, dtype=tf.float32)
-            mask1 = tf.pad(h_state, [[0,0], [hparams.rnn_layer_sizes[0], hparams.rnn_layer_sizes[1]*2]])
-            mask2 = tf.pad(h_state, [[0,0], [hparams.rnn_layer_sizes[0]*2, hparams.rnn_layer_sizes[1]]])
-            decoder_h0 += mask1 + mask2
+            for i in range(numDecodingLayers):
+                # set initial hidden state of all decoder layers
+                lenBefore = sum(hparams.rnn_layer_sizes[:i])*2 + hparams.rnn_layer_sizes[i]
+                lenAfter = sum(hparams.rnn_layer_sizes[i+1:])*2
+                attn_pad = 0
+                if hparams.attn_length > 0:
+                    attn_pad = TRAIN_BATCH_SIZE + hparams.attn_length*TRAIN_BATCH_SIZE
+                mask = tf.pad(h_state, [[0,0], [lenBefore, lenAfter + attn_pad]])
+                decoder_h0 += mask
 
         # Note: tf.reverse syntax unique to TF 0.12
         # TODO does reverse still make sense in a Melody? continue goes backwards.
@@ -186,15 +215,20 @@ def build_graph(mode, config, sequence_example_file_paths=None):
         softmax_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
             labels=labels_flat, logits=logits_flat)
 
-      # "latent loss" -- KL divergence from N(0,I) 
-      # TODO idk how this was derived exactly. what happened to det and trace?
-      # this term should be larger. wanna do KL cost annealing or something.
-      kld = -100 * tf.reduce_sum(1 + z_logvar - tf.square(z_mu) - tf.exp(z_logvar), 1)
+      global_step = tf.Variable(0, trainable=False, name='global_step')
+      # KL weight for annealing
+      kl_weight = tf.minimum(tf.div(tf.cast(global_step,tf.float32),5000.), 1.)
+
+      # "latent loss" -- KL divergence D[Q(z|x)||P(z)] where z ~ N(0,I)
+      # see Doersch tutorial page 9
+      # TODO this term should be larger... wanna do KL cost annealing or something.
+      kld = -0.5 * tf.reduce_sum(1 + z_logvar - tf.square(z_mu) - tf.exp(z_logvar), 1)
       # "reconstruction loss" 
-      reconstruction_loss = tf.reduce_sum(mask_flat * softmax_cross_entropy) / num_logits
       # VR lower bound -- cross entropy is equivalent to negative log likelihood.
+      # TODO scale on this?
+      reconstruction_loss = tf.reduce_sum(mask_flat * softmax_cross_entropy) / num_logits
       # average over batch
-      loss = tf.reduce_mean(reconstruction_loss + kld)
+      loss = tf.reduce_mean(reconstruction_loss + kl_weight*kld)
       # TODO regularize loss
       perplexity = (tf.reduce_sum(mask_flat * tf.exp(softmax_cross_entropy)) /
                     num_logits)
@@ -215,8 +249,6 @@ def build_graph(mode, config, sequence_example_file_paths=None):
           tf.reduce_sum(tf.multiply(correct_predictions, no_event_positions)) /
           tf.reduce_sum(no_event_positions) * 100)
 
-      global_step = tf.Variable(0, trainable=False, name='global_step')
-
       tf.add_to_collection('loss', loss)
       tf.add_to_collection('perplexity', perplexity)
       tf.add_to_collection('accuracy', accuracy)
@@ -230,6 +262,8 @@ def build_graph(mode, config, sequence_example_file_paths=None):
               'event_accuracy', event_accuracy),
           tf.summary.scalar(
               'no_event_accuracy', no_event_accuracy),
+          tf.summary.scalar(
+              'kl_cost', tf.reduce_mean(kld)),
       ]
 
       if mode == 'train':
@@ -265,7 +299,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       tf.add_to_collection('final_state', final_state)
       tf.add_to_collection('temperature', temperature)
       tf.add_to_collection('softmax', softmax)
-      # tf.add_to_collection('z_logvar', z_logvar)
-      # tf.add_to_collection('z_mu', z_mu)
+      tf.add_to_collection('z_logvar', z_logvar)
+      tf.add_to_collection('z_mu', z_mu)
 
   return graph
