@@ -17,7 +17,7 @@
 import tensorflow as tf
 import magenta
 
-TEMP_LATENT_SIZE = 10
+TEMP_LATENT_DIM = 10
 TEMP_HIDDEN_SIZE = 64
 TRAIN_BATCH_SIZE = 64 #TODO save properly
 
@@ -123,12 +123,12 @@ def build_graph(mode, config, sequence_example_file_paths=None):
             encoder_cell, inputs, initial_state=encoder_initial_state, parallel_iterations=1,
             swap_memory=True)
 
-        # We only look at the cell state of the last layer of the encoder LSTM
+        # We only look at the hidden state of the last layer of the encoder LSTM
         encoder_final_hidden_state = encoder_final_state[-1].h
         z_mu = tf.contrib.layers.fully_connected(encoder_final_hidden_state, 
-                num_outputs=TEMP_LATENT_SIZE, activation_fn=None, trainable=True)
+                num_outputs=TEMP_LATENT_DIM, activation_fn=None, trainable=True)
         z_logvar = tf.contrib.layers.fully_connected(encoder_final_hidden_state, 
-                num_outputs=TEMP_LATENT_SIZE, activation_fn=None, trainable=True)
+                num_outputs=TEMP_LATENT_DIM, activation_fn=None, trainable=True)
 
     # decoder
     with tf.variable_scope('decoder'):
@@ -165,7 +165,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
             # take z_mu, z_logvar from last batch input since batch_size is 1 for gen
             epsilon = tf.random_normal(tf.shape(z_logvar[-1]), 0, 1, dtype=tf.float32)
             z = z_mu[-1] + tf.mul(tf.sqrt(tf.exp(z_logvar[-1])), epsilon)
-            z = tf.reshape(z, [1, TEMP_LATENT_SIZE])
+            z = tf.reshape(z, [1, TEMP_LATENT_DIM])
             hidden1 = tf.contrib.layers.fully_connected(z, 
                     num_outputs=TEMP_HIDDEN_SIZE,
                     trainable=True)
@@ -187,13 +187,13 @@ def build_graph(mode, config, sequence_example_file_paths=None):
                 mask = tf.pad(h_state, [[0,0], [lenBefore, lenAfter + attn_pad]])
                 decoder_h0 += mask
 
-        # Note: tf.reverse syntax unique to TF 0.12
-        # TODO does reverse still make sense in a Melody? continue goes backwards.
-        # TODO do you need <EOS>?
         outputs, final_state = tf.nn.dynamic_rnn(
-            decoder_cell, tf.reverse(inputs, [False, False, True]), initial_state=decoder_h0,
+            decoder_cell, inputs, initial_state=decoder_h0,
             parallel_iterations=1, swap_memory=True)
 
+    # output_size = num_units
+    # num_steps = max_time
+    # => outputs shaped [batch_size, num_steps, num_units]. OK flat makes sense.
     outputs_flat = tf.reshape(outputs, [-1, decoder_cell.output_size])
     logits_flat = tf.contrib.layers.linear(outputs_flat, num_classes)
 
@@ -220,16 +220,16 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       kl_weight = tf.minimum(tf.div(tf.cast(global_step,tf.float32),5000.), 1.)
 
       # "latent loss" -- KL divergence D[Q(z|x)||P(z)] where z ~ N(0,I)
+      # = 1/2(tr(var) + (mu^t)(mu) - k - log|var|)
       # see Doersch tutorial page 9
-      # TODO this term should be larger... wanna do KL cost annealing or something.
-      kld = -0.5 * tf.reduce_sum(1 + z_logvar - tf.square(z_mu) - tf.exp(z_logvar), 1)
+      kld = 0.5 * tf.reduce_sum(tf.exp(z_logvar) + tf.square(z_mu) - 1 - z_logvar, 1)
       # "reconstruction loss" 
       # VR lower bound -- cross entropy is equivalent to negative log likelihood.
       # TODO scale on this?
       reconstruction_loss = tf.reduce_sum(mask_flat * softmax_cross_entropy) / num_logits
       # average over batch
-      loss = tf.reduce_mean(reconstruction_loss + kl_weight*kld)
-      # TODO regularize loss
+      loss = tf.reduce_mean(reconstruction_loss - kl_weight*kld)
+      # TODO if loss is decreasing, perplexity must decrease too... hm...
       perplexity = (tf.reduce_sum(mask_flat * tf.exp(softmax_cross_entropy)) /
                     num_logits)
 
@@ -237,6 +237,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
           tf.nn.in_top_k(logits_flat, labels_flat, 1)) * mask_flat
       accuracy = tf.reduce_sum(correct_predictions) / num_logits * 100
 
+      # accuracy ignoring the default, which is MELODY_NO_EVENT (for melody_rnn)
       event_positions = (
           tf.to_float(tf.not_equal(labels_flat, no_event_label)) * mask_flat)
       event_accuracy = (
