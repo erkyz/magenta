@@ -19,20 +19,28 @@ import magenta
 
 from magenta.models.shared import events_vrae_graph
 <<<<<<< HEAD
+<<<<<<< HEAD
 from magenta.models.shared import events_rnn_model
 =======
 from magenta.models.shared import events_vrae_model
 >>>>>>> 26ebd6ccae5e99b52a36f009dc1daff419e3e393
+=======
+from magenta.models.shared import events_vrae_model
+>>>>>>> old_tensorflow
 
 
 class EventSequenceRNNGraphTest(tf.test.TestCase):
 
   def setUp(self):
 <<<<<<< HEAD
+<<<<<<< HEAD
     self.config = events_rnn_model.EventSequenceRnnConfig(
 =======
     self.config = events_vrae_model.EventSequenceRnnConfig(
 >>>>>>> 26ebd6ccae5e99b52a36f009dc1daff419e3e393
+=======
+    self.config = events_vrae_model.EventSequenceRnnConfig(
+>>>>>>> old_tensorflow
         None,
         magenta.music.OneHotEventSequenceEncoderDecoder(
             magenta.music.testing_lib.TrivialOneHotEncoding(12)),
