@@ -18,11 +18,12 @@ import tensorflow as tf
 import magenta
 
 TEMP_LATENT_SIZE = 64
+TEMP_LATENT_SIZE = 20
 
 def make_rnn_cell(rnn_layer_sizes,
                   dropout_keep_prob=1.0,
                   attn_length=0,
-                  base_cell=tf.nn.rnn_cell.BasicLSTMCell,
+                  base_cell=tf.contrib.rnn.BasicLSTMCell,
                   state_is_tuple=False):
   """Makes a RNN cell from the given hyperparameters.
 
@@ -42,11 +43,11 @@ def make_rnn_cell(rnn_layer_sizes,
   cells = []
   for num_units in rnn_layer_sizes:
     cell = base_cell(num_units, state_is_tuple=state_is_tuple)
-    cell = tf.nn.rnn_cell.DropoutWrapper(
+    cell = tf.contrib.rnn.DropoutWrapper(
         cell, output_keep_prob=dropout_keep_prob)
     cells.append(cell)
 
-  cell = tf.nn.rnn_cell.MultiRNNCell(cells, state_is_tuple=state_is_tuple)
+  cell = tf.contrib.rnn.MultiRNNCell(cells, state_is_tuple=state_is_tuple)
   if attn_length:
     cell = tf.contrib.rnn.AttentionCellWrapper(
         cell, attn_length, state_is_tuple=state_is_tuple)
@@ -146,13 +147,13 @@ def build_graph(mode, config, sequence_example_file_paths=None):
                     trainable=True)
             decoder_h0.append(tf.nn.rnn_cell.LSTMStateTuple(c, h_state))
 
-        # Note: tf.reverse syntax unique to TF 0.12
         outputs, final_state = tf.nn.dynamic_rnn(
-            decoder_cell, tf.reverse(inputs, [False, True, False]), initial_state=tuple(decoder_h0),
+            decoder_cell, inputs, initial_state=tuple(decoder_h0),
             parallel_iterations=1, swap_memory=True)
 
-    outputs_flat = tf.reshape(outputs, [-1, decoder_cell.output_size])
-    logits_flat = tf.contrib.layers.linear(outputs_flat, num_classes)
+
+        outputs_flat = tf.reshape(outputs, [-1, cell.output_size])
+        logits_flat = tf.contrib.layers.linear(outputs_flat, num_classes)
 
     if mode == 'train' or mode == 'eval':
       '''

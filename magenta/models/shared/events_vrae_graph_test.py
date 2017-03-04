@@ -18,18 +18,30 @@ import tensorflow as tf
 import magenta
 
 from magenta.models.shared import events_vrae_graph
+<<<<<<< HEAD
 from magenta.models.shared import events_rnn_model
+=======
+from magenta.models.shared import events_vrae_model
+>>>>>>> 26ebd6ccae5e99b52a36f009dc1daff419e3e393
 
 
 class EventSequenceRNNGraphTest(tf.test.TestCase):
 
   def setUp(self):
+<<<<<<< HEAD
     self.config = events_rnn_model.EventSequenceRnnConfig(
+=======
+    self.config = events_vrae_model.EventSequenceRnnConfig(
+>>>>>>> 26ebd6ccae5e99b52a36f009dc1daff419e3e393
         None,
         magenta.music.OneHotEventSequenceEncoderDecoder(
             magenta.music.testing_lib.TrivialOneHotEncoding(12)),
         magenta.common.HParams(
+<<<<<<< HEAD
             batch_size=55,
+=======
+            batch_size=128,
+>>>>>>> 26ebd6ccae5e99b52a36f009dc1daff419e3e393
             rnn_layer_sizes=[128, 128],
             dropout_keep_prob=0.5,
             skip_first_n_losses=0,
@@ -43,12 +55,19 @@ class EventSequenceRNNGraphTest(tf.test.TestCase):
         'train', self.config, sequence_example_file_paths=['test'])
     self.assertTrue(isinstance(g, tf.Graph))
 
+<<<<<<< HEAD
+=======
+  '''
+>>>>>>> 26ebd6ccae5e99b52a36f009dc1daff419e3e393
   def testBuildEvalGraph(self):
     g = events_vrae_graph.build_graph(
         'eval', self.config, sequence_example_file_paths=['test'])
     self.assertTrue(isinstance(g, tf.Graph))
 
+<<<<<<< HEAD
   '''
+=======
+>>>>>>> 26ebd6ccae5e99b52a36f009dc1daff419e3e393
   def testBuildGenerateGraph(self):
     g = events_vrae_graph.build_graph('generate', self.config)
     self.assertTrue(isinstance(g, tf.Graph))
