@@ -98,9 +98,12 @@ def build_graph(mode, config, sequence_example_file_paths=None):
     if mode == 'train' or mode == 'eval':
       inputs, labels, lengths = magenta.common.get_padded_batch(
           sequence_example_file_paths, hparams.batch_size, input_size)
+      encoder_inputs = inputs
 
     elif mode == 'generate':
       inputs = tf.placeholder(tf.float32, [hparams.batch_size, None,
+                                           input_size])
+      encoder_inputs = tf.placeholder(tf.float32, [hparams.batch_size, None,
                                            input_size])
       # If state_is_tuple is True, the output RNN cell state will be a tuple
       # instead of a tensor. During training and evaluation this improves
@@ -118,9 +121,9 @@ def build_graph(mode, config, sequence_example_file_paths=None):
 
         encoder_initial_state = encoder_cell.zero_state(hparams.batch_size, tf.float32)
 
-        # TODO alter so it doesn't output stuff?
         _, encoder_final_state = tf.nn.dynamic_rnn(
-            encoder_cell, inputs, initial_state=encoder_initial_state, parallel_iterations=1,
+            encoder_cell, encoder_inputs, initial_state=encoder_initial_state, 
+            parallel_iterations=1,
             swap_memory=True)
 
         # We only look at the hidden state of the last layer of the encoder LSTM
@@ -217,8 +220,8 @@ def build_graph(mode, config, sequence_example_file_paths=None):
 
       global_step = tf.Variable(0, trainable=False, name='global_step')
       # KL weight for annealing
-      kl_weight = tf.minimum(tf.div(tf.cast(global_step,tf.float32),5000.), 1.)
-
+      kl_weight = 0.5*tf.tanh(0.05*(tf.cast(global_step,tf.float32)-500.))+0.5
+      
       # "latent loss" -- KL divergence D[Q(z|x)||P(z)] where z ~ N(0,I)
       # = 1/2(tr(var) + (mu^t)(mu) - k - log|var|)
       # see Doersch tutorial page 9
@@ -228,7 +231,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       # TODO scale on this?
       reconstruction_loss = tf.reduce_sum(mask_flat * softmax_cross_entropy) / num_logits
       # average over batch
-      loss = tf.reduce_mean(reconstruction_loss - kl_weight*kld)
+      loss = tf.reduce_mean(reconstruction_loss + kl_weight*kld)
       # TODO if loss is decreasing, perplexity must decrease too... hm...
       perplexity = (tf.reduce_sum(mask_flat * tf.exp(softmax_cross_entropy)) /
                     num_logits)
@@ -296,6 +299,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       softmax = tf.reshape(softmax_flat, [hparams.batch_size, -1, num_classes])
 
       tf.add_to_collection('inputs', inputs)
+      tf.add_to_collection('encoder_inputs', encoder_inputs)
       tf.add_to_collection('initial_state', decoder_h0)
       tf.add_to_collection('final_state', final_state)
       tf.add_to_collection('temperature', temperature)

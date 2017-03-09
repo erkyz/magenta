@@ -26,11 +26,11 @@ from magenta.models.shared import events_vrae_graph
 import magenta.music as mm
 
 
-class EventSequenceRnnModelException(Exception):
+class EventSequenceVraeModelException(Exception):
   pass
 
 
-class EventSequenceRnnModel(mm.BaseModel):
+class EventSequenceVraeModel(mm.BaseModel):
   """Class for RNN event sequence generation models.
 
   Currently this class only supports generation, of both event sequences and
@@ -45,7 +45,7 @@ class EventSequenceRnnModel(mm.BaseModel):
       config: An EventSequenceRnnConfig containing the encoder/decoder and
         HParams to use.
     """
-    super(EventSequenceRnnModel, self).__init__()
+    super(EventSequenceVraeModel, self).__init__()
     self._config = config
 
     # Override hparams for generation.
@@ -57,8 +57,8 @@ class EventSequenceRnnModel(mm.BaseModel):
   def _build_graph_for_generation(self):
     return events_vrae_graph.build_graph('generate', self._config)
 
-  def _generate_step_for_batch(self, event_sequences, inputs, initial_state,
-                               temperature):
+  def _generate_step_for_batch(self, event_sequences, inputs, encoder_inputs,
+          initial_state, temperature):
     """Extends a batch of event sequences by a single step each.
 
     This method modifies the event sequences in place.
@@ -86,15 +86,14 @@ class EventSequenceRnnModel(mm.BaseModel):
     assert len(event_sequences) == self._config.hparams.batch_size
 
     graph_inputs = self._session.graph.get_collection('inputs')[0]
+    graph_encoder_inputs = self._session.graph.get_collection('encoder_inputs')[0]
     graph_initial_state = self._session.graph.get_collection('initial_state')[0]
     graph_final_state = self._session.graph.get_collection('final_state')[0]
     graph_softmax = self._session.graph.get_collection('softmax')[0]
     graph_temperature = self._session.graph.get_collection('temperature')
-    # graph_z_mu = self._session.graph.get_collection('z_mu')[-1]
-    # graph_z_logvar = self._session.graph.get_collection('z_logvar')[-1]
 
-    feed_dict = {graph_inputs: inputs, graph_initial_state: initial_state}
-            # graph_z_mu: z_mu, graph_z_logvar: z_logvar}
+    feed_dict = {graph_inputs: inputs, graph_encoder_inputs: encoder_inputs,
+            graph_initial_state: initial_state}
     # For backwards compatibility, we only try to pass temperature if the
     # placeholder exists in the graph.
     if graph_temperature:
@@ -117,7 +116,8 @@ class EventSequenceRnnModel(mm.BaseModel):
 
     return final_state, loglik + np.log(p)
 
-  def _generate_step(self, event_sequences, inputs, initial_state, temperature):
+  def _generate_step(self, event_sequences, inputs, encoder_inputs, 
+          initial_state, temperature):
     """Extends a list of event sequences by a single step each.
 
     This method modifies the event sequences in place.
@@ -152,6 +152,7 @@ class EventSequenceRnnModel(mm.BaseModel):
       batch_final_state, batch_loglik = self._generate_step_for_batch(
           [event_sequences[i] for i in batch_indices],
           [inputs[i] for i in batch_indices],
+          [encoder_inputs[i] for i in batch_indices],
           initial_state[batch_indices, :],
           temperature)
       final_state[batch_indices, :] = batch_final_state
@@ -168,6 +169,7 @@ class EventSequenceRnnModel(mm.BaseModel):
           [event_sequences[i] for i in batch_indices] + [
               copy.deepcopy(event_sequences[-1]) for _ in range(pad_size)],
           [inputs[i] for i in batch_indices] + inputs[-1] * pad_size,
+          [encoder_inputs[i] for i in batch_indices],
           np.append(initial_state[batch_indices, :],
                     np.tile(inputs[-1, :], (pad_size, 1)),
                     axis=0),
@@ -178,7 +180,8 @@ class EventSequenceRnnModel(mm.BaseModel):
     return final_state, loglik
 
   def _generate_branches(self, event_sequences, loglik, branch_factor,
-                         num_steps, inputs, initial_state, temperature):
+                         num_steps, inputs, encoder_inputs, initial_state, 
+                         temperature):
     """Performs a single iteration of branch generation for beam search.
 
     This method generates `branch_factor` branches for each event sequence in
@@ -191,7 +194,9 @@ class EventSequenceRnnModel(mm.BaseModel):
           as `event_sequences`.
       branch_factor: The integer branch factor to use.
       num_steps: The integer number of steps to take per branch.
-      inputs: A Python list of model inputs, with length equal to the number of
+      inputs: A Python list of model inputs for the decoder, with length equal to the number of
+          event sequences.
+      inputs: A Python list of model inputs for the encoder, with length equal to the number of
           event sequences.
       initial_state: A numpy array containing the initial RNN states, where
           `initial_state.shape[0]` is equal to the number of event sequences.
@@ -209,12 +214,14 @@ class EventSequenceRnnModel(mm.BaseModel):
     all_event_sequences = [copy.deepcopy(events)
                            for events in event_sequences * branch_factor]
     all_inputs = inputs * branch_factor
+    all_encoder_inputs = encoder_inputs * branch_factor
     all_final_state = np.tile(initial_state, (branch_factor, 1))
     all_loglik = np.tile(loglik, (branch_factor,))
 
     for _ in range(num_steps):
       all_final_state, all_step_loglik = self._generate_step(
-          all_event_sequences, all_inputs, all_final_state, temperature)
+          all_event_sequences, all_inputs, all_encoder_inputs, 
+          all_final_state, temperature)
       all_loglik += all_step_loglik
 
     return all_event_sequences, all_final_state, all_loglik
@@ -249,7 +256,7 @@ class EventSequenceRnnModel(mm.BaseModel):
 
     return event_sequences, final_state, loglik
 
-  def _beam_search(self, events, num_steps, temperature, beam_size,
+  def _beam_search(self, events, encoder_events, num_steps, temperature, beam_size,
                    branch_factor, steps_per_iteration, control_events=None,
                    modify_events_callback=None):
     """Generates an event sequence using beam search.
@@ -299,6 +306,7 @@ class EventSequenceRnnModel(mm.BaseModel):
       The highest-likelihood event sequence as computed by the beam search.
     """
     event_sequences = [copy.deepcopy(events) for _ in range(beam_size)]
+    encoder_event_sequences = [encoder_events for _ in range(beam_size)]
     graph_initial_state = self._session.graph.get_collection('initial_state')[0]
     loglik = np.zeros(beam_size)
 
@@ -314,20 +322,24 @@ class EventSequenceRnnModel(mm.BaseModel):
       inputs = self._config.encoder_decoder.get_inputs_batch(
           event_sequences, full_length=True)
 
+    encoder_inputs = self._config.encoder_decoder.get_inputs_batch(
+        encoder_event_sequences, full_length=True)
+
     if modify_events_callback:
       modify_events_callback(
           self._config.encoder_decoder, event_sequences, inputs)
 
-    graph_inputs = self._session.graph.get_collection('inputs')[0]
-    feed_dict = {graph_inputs: inputs}
     graph_z_mu = self._session.graph.get_collection('z_mu')
-    z_mu = self._session.run(graph_z_mu, feed_dict)
-    print z_mu
-    initial_state = np.tile(
-        self._session.run(graph_initial_state, feed_dict), (beam_size, 1))
+    graph_encoder_inputs = self._session.graph.get_collection('encoder_inputs')[0]
+    graph_inputs = self._session.graph.get_collection('inputs')[0]
+    # note: graph_inputs not reached by initial_state
+    feed_dict = {graph_encoder_inputs: encoder_inputs, graph_inputs: inputs}
+    initial_state_, z_mu_ = self._session.run([graph_initial_state, graph_z_mu], feed_dict)
+    print z_mu_
+    initial_state = np.tile(initial_state_, (beam_size, 1))
     event_sequences, final_state, loglik = self._generate_branches(
         event_sequences, loglik, branch_factor, first_iteration_num_steps,
-        inputs, initial_state, temperature)
+        inputs, encoder_inputs, initial_state, temperature)
 
     num_iterations = (num_steps -
                       first_iteration_num_steps) / steps_per_iteration
@@ -348,7 +360,7 @@ class EventSequenceRnnModel(mm.BaseModel):
 
       event_sequences, final_state, loglik = self._generate_branches(
           event_sequences, loglik, branch_factor, steps_per_iteration, inputs,
-          final_state, temperature)
+          encoder_inputs, final_state, temperature)
 
     # Prune to a single sequence.
     event_sequences, final_state, loglik = self._prune_branches(
@@ -359,7 +371,7 @@ class EventSequenceRnnModel(mm.BaseModel):
 
     return event_sequences[0]
 
-  def _generate_events(self, num_steps, primer_events, temperature=1.0,
+  def _generate_events(self, num_steps, primer_events, encoder_events, temperature=1.0,
                        beam_size=1, branch_factor=1, steps_per_iteration=1,
                        control_events=None, modify_events_callback=None):
     """Generate an event sequence from a primer sequence.
@@ -412,7 +424,8 @@ class EventSequenceRnnModel(mm.BaseModel):
 
     events = primer_events
     if num_steps > len(primer_events):
-      events = self._beam_search(events, num_steps - len(events), temperature,
+      events = self._beam_search(events, encoder_events, 
+                                 num_steps - len(events), temperature,
                                  beam_size, branch_factor, steps_per_iteration,
                                  control_events, modify_events_callback)
     return events

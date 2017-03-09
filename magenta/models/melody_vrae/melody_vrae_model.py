@@ -26,10 +26,10 @@ DEFAULT_MAX_NOTE = 84
 DEFAULT_TRANSPOSE_TO_KEY = 0
 
 
-class MelodyVraeModel(events_vrae_model.EventSequenceRnnModel):
+class MelodyVraeModel(events_vrae_model.EventSequenceVraeModel):
   """Class for RNN melody generation models."""
 
-  def generate_melody(self, num_steps, primer_melody, temperature=1.0,
+  def generate_melody(self, num_steps, primer_melody, encoder_melody, temperature=1.0,
                       beam_size=1, branch_factor=1, steps_per_iteration=1):
     """Generate a melody from a primer melody.
 
@@ -37,6 +37,7 @@ class MelodyVraeModel(events_vrae_model.EventSequenceRnnModel):
       num_steps: The integer length in steps of the final melody, after
           generation. Includes the primer.
       primer_melody: The primer melody, a Melody object.
+      encoder_melody: The melody to give to the encoder, a Melody object.
       temperature: A float specifying how much to divide the logits by
          before computing the softmax. Greater than 1.0 makes melodies more
          random, less than 1.0 makes melodies less random.
@@ -57,7 +58,8 @@ class MelodyVraeModel(events_vrae_model.EventSequenceRnnModel):
         self._config.max_note,
         self._config.transpose_to_key)
 
-    melody = self._generate_events(num_steps, melody, temperature, beam_size,
+    melody = self._generate_events(num_steps, melody, encoder_melody, 
+                                   temperature, beam_size,
                                    branch_factor, steps_per_iteration)
 
     melody.transpose(-transpose_amount)
