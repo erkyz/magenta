@@ -21,15 +21,15 @@ from magenta.models.melody_vrae import melody_vrae_model
 import magenta.music as mm
 
 
-class MelodyRnnSequenceGenerator(mm.BaseSequenceGenerator):
+class MelodyVraeSequenceGenerator(mm.BaseSequenceGenerator):
   """Shared Melody RNN generation code as a SequenceGenerator interface."""
 
   def __init__(self, model, details, steps_per_quarter=4, checkpoint=None,
                bundle=None):
-    """Creates a MelodyRnnSequenceGenerator.
+    """Creates a MelodyVraeSequenceGenerator.
 
     Args:
-      model: Instance of MelodyRnnModel.
+      model: Instance of MelodyVraeModel.
       details: A generator_pb2.GeneratorDetails for this generator.
       steps_per_quarter: What precision to use when quantizing the melody. How
           many steps per quarter note.
@@ -38,10 +38,10 @@ class MelodyRnnSequenceGenerator(mm.BaseSequenceGenerator):
       bundle: A GeneratorBundle object that includes both the model checkpoint
           and metagraph. Mutually exclusive with `checkpoint`.
     """
-    super(MelodyRnnSequenceGenerator, self).__init__(
+    super(MelodyVraeSequenceGenerator, self).__init__(
         model, details, steps_per_quarter, checkpoint, bundle)
 
-  def _generate(self, input_sequence, generator_options):
+  def _generate(self, input_sequence, generator_options, encoder_sequence):
     if len(generator_options.input_sections) > 1:
       raise mm.SequenceGeneratorException(
           'This model supports at most one input_sections message, but got %s' %
@@ -77,12 +77,18 @@ class MelodyRnnSequenceGenerator(mm.BaseSequenceGenerator):
     # Quantize the priming sequence.
     quantized_sequence = mm.quantize_note_sequence(
         primer_sequence, self.steps_per_quarter)
+    quantized_encoder_sequence = mm.quantize_note_sequence(
+        encoder_sequence, self.steps_per_quarter)
     # Setting gap_bars to infinite ensures that the entire input will be used.
     extracted_melodies, _ = mm.extract_melodies(
         quantized_sequence, search_start_step=input_start_step, min_bars=0,
         min_unique_pitches=1, gap_bars=float('inf'),
         ignore_polyphonic_notes=True)
     assert len(extracted_melodies) <= 1
+    extracted_encoder_melodies, _ = mm.extract_melodies(
+        quantized_encoder_sequence, min_bars=0,
+        min_unique_pitches=1, gap_bars=float('inf'),
+        ignore_polyphonic_notes=True)
 
     start_step = self.seconds_to_steps(
         generate_section.start_time, qpm)
@@ -95,6 +101,10 @@ class MelodyRnnSequenceGenerator(mm.BaseSequenceGenerator):
       # step before the request start_step. This will result in 1 step of
       # silence when the melody is extended below.
       melody = mm.Melody([], start_step=max(0, start_step - 1))
+
+    if extracted_encoder_melodies and extracted_encoder_melodies[0]:
+      encoder_melody = extracted_encoder_melodies[0]
+      print encoder_melody
 
     # Ensure that the melody extends up to the step we want to start generating.
     melody.set_length(start_step - melody.start_step)
@@ -111,7 +121,7 @@ class MelodyRnnSequenceGenerator(mm.BaseSequenceGenerator):
                 if name in generator_options.args)
 
     generated_melody = self._model.generate_melody(
-        end_step - melody.start_step, melody, **args)
+        end_step - melody.start_step, melody, encoder_melody, **args)
     generated_sequence = generated_melody.to_sequence(qpm=qpm)
     assert (generated_sequence.total_time - generate_section.end_time) <= 1e-5
     return generated_sequence
@@ -128,7 +138,7 @@ def get_generator_map():
     bound `config` argument.
   """
   def create_sequence_generator(config, **kwargs):
-    return MelodyRnnSequenceGenerator(
+    return MelodyVraeSequenceGenerator(
         melody_vrae_model.MelodyVraeModel(config), config.details, **kwargs)
 
   return {key: partial(create_sequence_generator, config)

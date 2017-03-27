@@ -101,7 +101,7 @@ class BaseSequenceGenerator(object):
     return self._steps_per_quarter
 
   @abc.abstractmethod
-  def _generate(self, input_sequence, generator_options):
+  def _generate(self, input_sequence, generator_options, encoder_sequence=None):
     """Implementation for sequence generation based on sequence and options.
 
     The implementation can assume that _initialize has been called before this
@@ -187,7 +187,7 @@ class BaseSequenceGenerator(object):
     """When used as a context manager, closes the TF session."""
     self.close()
 
-  def generate(self, input_sequence, generator_options):
+  def generate(self, input_sequence, generator_options, encoder_sequence=None):
     """Generates a sequence from the model based on sequence and options.
 
     Also initializes the TF graph if not yet initialized.
@@ -201,7 +201,7 @@ class BaseSequenceGenerator(object):
       The generated NoteSequence proto.
     """
     self.initialize()
-    return self._generate(input_sequence, generator_options)
+    return self._generate(input_sequence, generator_options, encoder_sequence)
 
   def create_bundle_file(self, bundle_file, bundle_description=None):
     """Writes a generator_pb2.GeneratorBundle file in the specified location.

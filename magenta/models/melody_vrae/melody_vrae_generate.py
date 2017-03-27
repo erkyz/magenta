@@ -72,6 +72,10 @@ tf.app.flags.DEFINE_string(
     'The path to a MIDI file containing a melody that will be used as a '
     'priming melody. If a primer melody is not specified, melodies will be '
     'generated from scratch.')
+tf.app.flags.DEFINE_string(
+    'encoder_midi', '',
+    'The path to a MIDI file containing a melody that will be used as a '
+    'by the encoder to generate a latent variable z.')
 tf.app.flags.DEFINE_float(
     'qpm', None,
     'The quarters per minute to play generated output at. If a primer MIDI is '
@@ -179,6 +183,10 @@ def run_with_flags(generator):
     primer_melody = magenta.music.Melody([60])
     primer_sequence = primer_melody.to_sequence(qpm=qpm)
 
+  encoder_midi, encoder_sequence = None, None
+  encoder_midi = os.path.expanduser(FLAGS.encoder_midi)
+  encoder_sequence = magenta.music.midi_file_to_sequence_proto(encoder_midi)
+
   # Derive the total number of seconds to generate based on the QPM of the
   # priming sequence and the num_steps flag.
   total_seconds = _steps_to_seconds(FLAGS.num_steps, qpm)
@@ -222,7 +230,8 @@ def run_with_flags(generator):
   date_and_time = time.strftime('%Y-%m-%d_%H%M%S')
   digits = len(str(FLAGS.num_outputs))
   for i in range(FLAGS.num_outputs):
-    generated_sequence = generator.generate(input_sequence, generator_options)
+    generated_sequence = generator.generate(input_sequence, 
+            generator_options, encoder_sequence)
 
     midi_filename = '%s_%s.mid' % (date_and_time, str(i + 1).zfill(digits))
     midi_path = os.path.join(FLAGS.output_dir, midi_filename)
@@ -237,7 +246,7 @@ def main(unused_argv):
   tf.logging.set_verbosity(FLAGS.log)
 
   config = melody_vrae_config_flags.config_from_flags()
-  generator = melody_vrae_sequence_generator.MelodyRnnSequenceGenerator(
+  generator = melody_vrae_sequence_generator.MelodyVraeSequenceGenerator(
       model=melody_vrae_model.MelodyVraeModel(config),
       details=config.details,
       steps_per_quarter=FLAGS.steps_per_quarter,

@@ -16,50 +16,11 @@
 # internal imports
 import tensorflow as tf
 import magenta
+import magenta.models.shared.events_vrae_ops as ops
 
 TEMP_LATENT_DIM = 10
 TEMP_HIDDEN_SIZE = 64
 TRAIN_BATCH_SIZE = 64 #TODO save properly
-
-def make_rnn_cell(rnn_layer_sizes,
-                  nlayers,
-                  output_keep_prob=1.0,
-                  input_keep_prob=1.0,
-                  attn_length=0,
-                  base_cell=tf.nn.rnn_cell.BasicLSTMCell,
-                  state_is_tuple=False):
-  """Makes a RNN cell from the given hyperparameters.
-
-  Args:
-    rnn_layer_sizes: A list of integer sizes (in units) for each layer of the
-        RNN.
-    dropout_keep_prob: The float probability to keep the output of any given
-        sub-cell.
-    attn_length: The size of the attention vector.
-    base_cell: The base tf.contrib.rnn.RNNCell to use for sub-cells.
-    state_is_tuple: A boolean specifying whether to use tuple of hidden matrix
-        and cell matrix as a state instead of a concatenated matrix.
-
-  Returns:
-      A tf.contrib.rnn.MultiRNNCell based on the given hyperparameters.
-  """
-  cells, layer = [], 0
-  for num_units in rnn_layer_sizes:
-    if layer == nlayers:
-        break
-    cell = base_cell(num_units, state_is_tuple=state_is_tuple)
-    cell = tf.nn.rnn_cell.DropoutWrapper(
-        cell, output_keep_prob=output_keep_prob, input_keep_prob=input_keep_prob)
-    cells.append(cell)
-    layer += 1
-
-  cell = tf.nn.rnn_cell.MultiRNNCell(cells, state_is_tuple=state_is_tuple)
-  if attn_length:
-    cell = tf.contrib.rnn.AttentionCellWrapper(
-        cell, attn_length, state_is_tuple=state_is_tuple)
-
-  return cell
-
 
 def build_graph(mode, config, sequence_example_file_paths=None):
   """Builds the TensorFlow graph.
@@ -99,9 +60,12 @@ def build_graph(mode, config, sequence_example_file_paths=None):
     if mode == 'train' or mode == 'eval':
       inputs, labels, lengths = magenta.common.get_padded_batch(
           sequence_example_file_paths, hparams.batch_size, input_size)
+      encoder_inputs = inputs
 
     elif mode == 'generate':
       inputs = tf.placeholder(tf.float32, [hparams.batch_size, None,
+                                           input_size])
+      encoder_inputs = tf.placeholder(tf.float32, [hparams.batch_size, None,
                                            input_size])
       # If state_is_tuple is True, the output RNN cell state will be a tuple
       # instead of a tensor. During training and evaluation this improves
@@ -112,17 +76,15 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       state_is_tuple = False
 
     with tf.variable_scope('encoder'):
-  	with tf.device("/gpu:0"):
-          encoder_cell = make_rnn_cell(hparams.rnn_layer_sizes, 2,
-                           output_keep_prob=hparams.dropout_keep_prob,
-                           attn_length=0, # do not use attention on the encoder
-                           state_is_tuple=True)
-
+  	encoder_cell = make_rnn_cell(hparams.rnn_layer_sizes, 2,
+		   output_keep_prob=hparams.dropout_keep_prob,
+		   attn_length=0, # do not use attention on the encoder
+		   state_is_tuple=True)
         encoder_initial_state = encoder_cell.zero_state(hparams.batch_size, tf.float32)
 
-        # TODO alter so it doesn't output stuff?
         _, encoder_final_state = tf.nn.dynamic_rnn(
-            encoder_cell, inputs, initial_state=encoder_initial_state, parallel_iterations=1,
+            encoder_cell, encoder_inputs, initial_state=encoder_initial_state, 
+            parallel_iterations=1,
             swap_memory=True)
 
         # We only look at the hidden state of the last layer of the encoder LSTM
@@ -134,84 +96,102 @@ def build_graph(mode, config, sequence_example_file_paths=None):
 
     # decoder
     with tf.variable_scope('decoder'):
-        numDecodingLayers = len(hparams.rnn_layer_sizes)
-        # TODO attention
-  	with tf.device("/gpu:0"):
-          decoder_cell = make_rnn_cell(hparams.rnn_layer_sizes, numDecodingLayers,
-                               output_keep_prob=hparams.dropout_keep_prob,
-	      		       input_keep_prob=0.5,
-                               attn_length=hparams.attn_length,
-                               state_is_tuple=state_is_tuple)
-        
-        # sample z using reparameterization trick
-        if state_is_tuple:
-            decoder_h0 = []
-            zero_state = decoder_cell.zero_state(hparams.batch_size, dtype=tf.float32)
-            zerostate = zero_state[0] if hparams.attn_length > 0 else zero_state
-            for c, h, in zerostate:
-                # TODO each layer should have its own z_mu, z_logvar?
-                epsilon = tf.random_normal(tf.shape(z_logvar), 0, 1, dtype=tf.float32)
-                z = z_mu + tf.mul(tf.sqrt(tf.exp(z_logvar)), epsilon)
+        if hparams.dilated_cnn:
+            epsilon = tf.random_normal(tf.shape(z_logvar), 0, 1, dtype=tf.float32)
+            z = z_mu + tf.mul(tf.sqrt(tf.exp(z_logvar)), epsilon)
+            dilations = [2**i for i in range(hparams.block_size)] * hparams.block_num
+            zero_state = ops.dilated_cnn_zero_state(
+                    hparams.batch_size, dilations, hparams.residual_channels)
+            outputs, final_state = ops.dilated_cnn(
+                    inputs, zero_state,
+                    dilations=dilations,
+                    residual_channels=hparams.residual_channels, 
+                    dilation_channels=hparams.dilation_channels,
+                    output_channels=hparams.output_channels,
+                    global_condition=z,
+                    filter_width=hparams.filter_width,
+                    dropout_keep_prob=hparams.dropout_keep_prob,
+                    mode=mode
+                    )
+        else:
+            numDecodingLayers = len(hparams.rnn_layer_sizes)
+            # TODO attention
+            decoder_cell = ops.make_rnn_cell(hparams.rnn_layer_sizes, numDecodingLayers,
+                                 dropout_keep_prob=hparams.dropout_keep_prob,
+                                 attn_length=hparams.attn_length,
+                                 state_is_tuple=state_is_tuple)
+            
+            # sample z using reparameterization trick
+            if state_is_tuple:
+                decoder_h0 = []
+                zero_state = decoder_cell.zero_state(hparams.batch_size, dtype=tf.float32)
+                zerostate = zero_state[0] if hparams.attn_length > 0 else zero_state
+                for c, h, in zerostate:
+                    # TODO each layer should have its own z_mu, z_logvar?
+                    epsilon = tf.random_normal(tf.shape(z_logvar), 0, 1, dtype=tf.float32)
+                    z = z_mu + tf.mul(tf.sqrt(tf.exp(z_logvar)), epsilon)
+                    hidden1 = tf.contrib.layers.fully_connected(z, 
+                            num_outputs=TEMP_HIDDEN_SIZE,
+                            trainable=True)
+                    hidden2 = tf.contrib.layers.fully_connected(hidden1, 
+                            num_outputs=TEMP_HIDDEN_SIZE,
+                            trainable=True)
+                    h_state = tf.contrib.layers.fully_connected(hidden2, 
+                            num_outputs=hparams.rnn_layer_sizes[len(decoder_h0)],
+                            trainable=True)
+                    decoder_h0.append(tf.nn.rnn_cell.LSTMStateTuple(c, h_state))
+                decoder_h0 = tuple(decoder_h0)
+                if hparams.attn_length > 0:
+                    decoder_h0 = (decoder_h0, zero_state[1], zero_state[2])
+            else:
+                # take z_mu, z_logvar from last batch input since batch_size is 1 for gen
+                epsilon = tf.random_normal(tf.shape(z_logvar[-1]), 0, 1, dtype=tf.float32)
+                z = z_mu[-1] + tf.mul(tf.sqrt(tf.exp(z_logvar[-1])), epsilon)
+                z = tf.reshape(z, [1, TEMP_LATENT_DIM])
                 hidden1 = tf.contrib.layers.fully_connected(z, 
                         num_outputs=TEMP_HIDDEN_SIZE,
                         trainable=True)
                 hidden2 = tf.contrib.layers.fully_connected(hidden1, 
                         num_outputs=TEMP_HIDDEN_SIZE,
                         trainable=True)
+                # this assumes that all the layer sizes are the same
                 h_state = tf.contrib.layers.fully_connected(hidden2, 
-                        num_outputs=hparams.rnn_layer_sizes[len(decoder_h0)],
+                        num_outputs=hparams.rnn_layer_sizes[0], 
                         trainable=True)
-                decoder_h0.append(tf.nn.rnn_cell.LSTMStateTuple(c, h_state))
-            decoder_h0 = tuple(decoder_h0)
-            if hparams.attn_length > 0:
-                decoder_h0 = (decoder_h0, zero_state[1], zero_state[2])
-        else:
-            # take z_mu, z_logvar from last batch input since batch_size is 1 for gen
-            epsilon = tf.random_normal(tf.shape(z_logvar[-1]), 0, 1, dtype=tf.float32)
-            z = z_mu[-1] + tf.mul(tf.sqrt(tf.exp(z_logvar[-1])), epsilon)
-            z = tf.reshape(z, [1, TEMP_LATENT_DIM])
-            hidden1 = tf.contrib.layers.fully_connected(z, 
-                    num_outputs=TEMP_HIDDEN_SIZE,
-                    trainable=True)
-            hidden2 = tf.contrib.layers.fully_connected(hidden1, 
-                    num_outputs=TEMP_HIDDEN_SIZE,
-                    trainable=True)
-            # this assumes that all the layer sizes are the same
-            h_state = tf.contrib.layers.fully_connected(hidden2, 
-                    num_outputs=hparams.rnn_layer_sizes[0], 
-                    trainable=True)
-            decoder_h0 = decoder_cell.zero_state(hparams.batch_size, dtype=tf.float32)
-            for i in range(numDecodingLayers):
-                # set initial hidden state of all decoder layers
-                lenBefore = sum(hparams.rnn_layer_sizes[:i])*2 + hparams.rnn_layer_sizes[i]
-                lenAfter = sum(hparams.rnn_layer_sizes[i+1:])*2
-                attn_pad = 0
-                if hparams.attn_length > 0:
-                    attn_pad = TRAIN_BATCH_SIZE + hparams.attn_length*TRAIN_BATCH_SIZE
-                mask = tf.pad(h_state, [[0,0], [lenBefore, lenAfter + attn_pad]])
-                decoder_h0 += mask
+                decoder_h0 = decoder_cell.zero_state(hparams.batch_size, dtype=tf.float32)
+                for i in range(numDecodingLayers):
+                    # set initial hidden state of all decoder layers
+                    lenBefore = sum(hparams.rnn_layer_sizes[:i])*2 + hparams.rnn_layer_sizes[i]
+                    lenAfter = sum(hparams.rnn_layer_sizes[i+1:])*2
+                    attn_pad = 0
+                    if hparams.attn_length > 0:
+                        attn_pad = TRAIN_BATCH_SIZE + hparams.attn_length*TRAIN_BATCH_SIZE
+                    mask = tf.pad(h_state, [[0,0], [lenBefore, lenAfter + attn_pad]])
+                    decoder_h0 += mask
 
-        outputs, final_state = tf.nn.dynamic_rnn(
-            decoder_cell, inputs, initial_state=decoder_h0,
-            parallel_iterations=1, swap_memory=True)
+            outputs, final_state = tf.nn.dynamic_rnn(
+                decoder_cell, inputs, initial_state=decoder_h0,
+                parallel_iterations=1, swap_memory=True)
 
-    # output_size = num_units
-    # num_steps = max_time
-    # => outputs shaped [batch_size, num_steps, num_units]. OK flat makes sense.
-    outputs_flat = tf.reshape(outputs, [-1, decoder_cell.output_size])
-    logits_flat = tf.contrib.layers.linear(outputs_flat, num_classes)
+        output_size = hparams.output_channels if hparams.dilated_cnn \
+                else decoder_cell.output_size
+        # output_size = num_units
+        # num_steps = max_time
+        # => outputs shaped [batch_size, num_steps, num_units]. OK flat makes sense.
+        outputs_flat = tf.reshape(outputs, [-1, output_size])
+        # unscaled
+        logits_flat = tf.contrib.layers.linear(outputs_flat, num_classes)
+        print logits_flat
 
     if mode == 'train' or mode == 'eval':
-      '''
-      if hparams.skip_first_n_losses:
-        logits = tf.reshape(logits_flat, [hparams.batch_size, -1, num_classes])
-        logits = logits[:, hparams.skip_first_n_losses:, :]
-        logits_flat = tf.reshape(logits, [-1, num_classes])
-        labels = labels[:, hparams.skip_first_n_losses:]
-      '''
-
       labels_flat = tf.reshape(labels, [-1])
-      mask_flat = tf.reshape(tf.sequence_mask(lengths, dtype=tf.float32), [-1])
+      mask = tf.sequence_mask(lengths)
+      if hparams.skip_first_n_losses:
+        skip = tf.minimum(lengths, hparams.skip_first_n_losses)
+        skip_mask = tf.sequence_mask(skip, maxlen=tf.reduce_max(lengths))
+        mask = tf.logical_and(mask, tf.logical_not(skip_mask))
+      mask = tf.cast(mask, tf.float32)
+      mask_flat = tf.reshape(mask, [-1])
       num_logits = tf.to_float(tf.reduce_sum(lengths))
 
       with tf.control_dependencies(
@@ -223,7 +203,8 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       # KL weight for annealing
       kl_weight = 0.00003*tf.tanh(0.001*(tf.cast(global_step,tf.float32)-10000.))+0.00003
       # kl_weight = 0.5*tf.tanh(0.01*(tf.cast(global_step,tf.float32)-1000.))+0.5
-
+      # TODO only minimize the KL term when it is large enough -- max with some gamma
+      
       # "latent loss" -- KL divergence D[Q(z|x)||P(z)] where z ~ N(0,I)
       # = 1/2(tr(var) + (mu^t)(mu) - k - log|var|)
       # see Doersch tutorial page 9
@@ -305,6 +286,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       softmax = tf.reshape(softmax_flat, [hparams.batch_size, -1, num_classes])
 
       tf.add_to_collection('inputs', inputs)
+      tf.add_to_collection('encoder_inputs', encoder_inputs)
       tf.add_to_collection('initial_state', decoder_h0)
       tf.add_to_collection('final_state', final_state)
       tf.add_to_collection('temperature', temperature)
