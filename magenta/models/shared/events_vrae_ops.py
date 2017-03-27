@@ -66,8 +66,8 @@ def _causal_conv(value,
             conv = tf.nn.conv2d(padded, weights_filter, strides=[1,1,1,1], padding='VALID')
         return conv
 
-def _create_dilation_layer(input_batch, layer_idx, dilation, global_condition, filter_width, 
-        residual_channels, dilation_channels, is_training):
+def _create_dilation_layer(input_batch, layer_idx, dilation, global_condition_batch, 
+        filter_width, residual_channels, dilation_channels, is_training):
     # Each layer is wrapped in a residual block.
     # TODO layer norms, gated activation unit instead of ReLU
     # TODO add global condition
@@ -80,6 +80,11 @@ def _create_dilation_layer(input_batch, layer_idx, dilation, global_condition, f
             out_channels=dilation_channels,
             dilation=1,
             name='conv1d_1_layer{}'.format(layer_idx))
+    conv1 = conv1 + _causal_conv(global_condition_batch,
+                        filter_width=1,
+                        out_channels=dilation_channels,
+                        dilation=1,
+                        name='gc_filter_layer{}'.format(layer_idx))
 
     # ReLU 1xk 512
     relu2 = tf.nn.relu(conv1, name='relu2_layer{}'.format(layer_idx))
@@ -144,12 +149,6 @@ def dilated_cnn(inputs, initial_state, dilations,
             out_channels=residual_channels,
             dilation=1,
             name='causal_layer')
-    current_layer = current_layer + \
-            _causal_conv(global_condition_batch,
-                    filter_width=1,
-                    out_channels=residual_channels,
-                    dilation=1,
-                    name='gc_filter')
 
     # expect shape to be [batch, 1, out_width, out_channels]
     # out_width = in_width - (filter_width - 1) * dilation (I think.) -- this comes from the pyramid structure.
@@ -169,7 +168,7 @@ def dilated_cnn(inputs, initial_state, dilations,
             h = current_layer
 
             layer_output = _create_dilation_layer(
-                    h, i, dilation, global_condition, 
+                    h, i, dilation, global_condition_batch, 
                     filter_width, residual_channels, dilation_channels,
                     (mode == 'train'))
             current_layer = layer_output
