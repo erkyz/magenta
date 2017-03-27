@@ -23,7 +23,8 @@ TRAIN_BATCH_SIZE = 64 #TODO save properly
 
 def make_rnn_cell(rnn_layer_sizes,
                   nlayers,
-                  dropout_keep_prob=1.0,
+                  output_keep_prob=1.0,
+                  input_keep_prob=1.0,
                   attn_length=0,
                   base_cell=tf.nn.rnn_cell.BasicLSTMCell,
                   state_is_tuple=False):
@@ -48,7 +49,7 @@ def make_rnn_cell(rnn_layer_sizes,
         break
     cell = base_cell(num_units, state_is_tuple=state_is_tuple)
     cell = tf.nn.rnn_cell.DropoutWrapper(
-        cell, output_keep_prob=dropout_keep_prob)
+        cell, output_keep_prob=output_keep_prob, input_keep_prob=input_keep_prob)
     cells.append(cell)
     layer += 1
 
@@ -111,10 +112,11 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       state_is_tuple = False
 
     with tf.variable_scope('encoder'):
-        encoder_cell = make_rnn_cell(hparams.rnn_layer_sizes, 2,
-                         dropout_keep_prob=hparams.dropout_keep_prob,
-                         attn_length=0, # do not use attention on the encoder
-                         state_is_tuple=True)
+  	with tf.device("/gpu:0"):
+          encoder_cell = make_rnn_cell(hparams.rnn_layer_sizes, 2,
+                           output_keep_prob=hparams.dropout_keep_prob,
+                           attn_length=0, # do not use attention on the encoder
+                           state_is_tuple=True)
 
         encoder_initial_state = encoder_cell.zero_state(hparams.batch_size, tf.float32)
 
@@ -134,10 +136,12 @@ def build_graph(mode, config, sequence_example_file_paths=None):
     with tf.variable_scope('decoder'):
         numDecodingLayers = len(hparams.rnn_layer_sizes)
         # TODO attention
-        decoder_cell = make_rnn_cell(hparams.rnn_layer_sizes, numDecodingLayers,
-                             dropout_keep_prob=hparams.dropout_keep_prob,
-                             attn_length=hparams.attn_length,
-                             state_is_tuple=state_is_tuple)
+  	with tf.device("/gpu:0"):
+          decoder_cell = make_rnn_cell(hparams.rnn_layer_sizes, numDecodingLayers,
+                               output_keep_prob=hparams.dropout_keep_prob,
+	      		       input_keep_prob=0.5,
+                               attn_length=hparams.attn_length,
+                               state_is_tuple=state_is_tuple)
         
         # sample z using reparameterization trick
         if state_is_tuple:
@@ -217,18 +221,20 @@ def build_graph(mode, config, sequence_example_file_paths=None):
 
       global_step = tf.Variable(0, trainable=False, name='global_step')
       # KL weight for annealing
-      kl_weight = tf.minimum(tf.div(tf.cast(global_step,tf.float32),5000.), 1.)
+      kl_weight = 0.00003*tf.tanh(0.001*(tf.cast(global_step,tf.float32)-10000.))+0.00003
+      # kl_weight = 0.5*tf.tanh(0.01*(tf.cast(global_step,tf.float32)-1000.))+0.5
 
       # "latent loss" -- KL divergence D[Q(z|x)||P(z)] where z ~ N(0,I)
       # = 1/2(tr(var) + (mu^t)(mu) - k - log|var|)
       # see Doersch tutorial page 9
       kld = 0.5 * tf.reduce_sum(tf.exp(z_logvar) + tf.square(z_mu) - 1 - z_logvar, 1)
+      # kld = -0.5 * tf.reduce_sum(1 + z_logvar - tf.square(z_mu) - tf.exp(z_logvar), 1)
       # "reconstruction loss" 
       # VR lower bound -- cross entropy is equivalent to negative log likelihood.
       # TODO scale on this?
       reconstruction_loss = tf.reduce_sum(mask_flat * softmax_cross_entropy) / num_logits
       # average over batch
-      loss = tf.reduce_mean(reconstruction_loss - kl_weight*kld)
+      loss = tf.reduce_mean(reconstruction_loss + kl_weight*kld)
       # TODO if loss is decreasing, perplexity must decrease too... hm...
       perplexity = (tf.reduce_sum(mask_flat * tf.exp(softmax_cross_entropy)) /
                     num_logits)
@@ -265,6 +271,8 @@ def build_graph(mode, config, sequence_example_file_paths=None):
               'no_event_accuracy', no_event_accuracy),
           tf.summary.scalar(
               'kl_cost', tf.reduce_mean(kld)),
+          tf.summary.scalar(
+              'kl_weight', kl_weight)
       ]
 
       if mode == 'train':
@@ -277,8 +285,9 @@ def build_graph(mode, config, sequence_example_file_paths=None):
         gradients = tf.gradients(loss, params)
         clipped_gradients, _ = tf.clip_by_global_norm(gradients,
                                                       hparams.clip_norm)
-        train_op = opt.apply_gradients(zip(clipped_gradients, params),
-                                       global_step)
+  	with tf.device("/gpu:0"):
+          train_op = opt.apply_gradients(zip(clipped_gradients, params),
+                                         global_step)
         tf.add_to_collection('learning_rate', learning_rate)
         tf.add_to_collection('train_op', train_op)
 
