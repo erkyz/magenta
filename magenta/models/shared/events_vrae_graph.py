@@ -182,7 +182,11 @@ def build_graph(mode, config, sequence_example_file_paths=None):
         outputs_flat = tf.reshape(outputs, [-1, output_size])
         # unscaled
         logits_flat = tf.contrib.layers.linear(outputs_flat, num_classes)
-        print logits_flat
+
+    temperature = tf.placeholder(tf.float32, []) if mode == 'generate' else 1.0
+    softmax_flat = tf.nn.softmax(
+        tf.div(logits_flat, tf.fill([num_classes], temperature)))
+    softmax = tf.reshape(softmax_flat, [hparams.batch_size, -1, num_classes])
 
     if mode == 'train' or mode == 'eval':
       labels_flat = tf.reshape(labels, [-1])
@@ -194,6 +198,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       mask = tf.cast(mask, tf.float32)
       mask_flat = tf.reshape(mask, [-1])
       num_logits = tf.to_float(tf.reduce_sum(lengths))
+      num_sequences = tf.to_float(tf.shape(lengths)[0])
 
       with tf.control_dependencies(
           [tf.Assert(tf.greater(num_logits, 0.), [num_logits])]):
@@ -214,10 +219,13 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       # TODO scale on this?
       reconstruction_loss = tf.reduce_sum(mask_flat * softmax_cross_entropy) / num_logits
       # average over batch
-      loss = tf.reduce_mean(reconstruction_loss + kl_weight*kld)
+      loss = tf.reduce_mean(reconstruction_loss + tf.maximum([1.]*hparams.batch_size,kld))
       # TODO if loss is decreasing, perplexity must decrease too... hm...
       perplexity = (tf.reduce_sum(mask_flat * tf.exp(softmax_cross_entropy)) /
                     num_logits)
+
+      # average over sequences
+      nll = tf.reduce_sum(mask_flat * softmax_cross_entropy) / num_sequences
 
       correct_predictions = tf.to_float(
           tf.nn.in_top_k(logits_flat, labels_flat, 1)) * mask_flat
@@ -238,6 +246,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
 
       tf.add_to_collection('loss', loss)
       tf.add_to_collection('perplexity', perplexity)
+      tf.add_to_collection('nll', nll)
       tf.add_to_collection('accuracy', accuracy)
       tf.add_to_collection('global_step', global_step)
 
@@ -251,6 +260,8 @@ def build_graph(mode, config, sequence_example_file_paths=None):
               'no_event_accuracy', no_event_accuracy),
           tf.summary.scalar(
               'kl_cost', tf.reduce_mean(kld)),
+          tf.summary.scalar(
+              'nll', nll),
       ]
 
       if mode == 'train':
@@ -276,13 +287,12 @@ def build_graph(mode, config, sequence_example_file_paths=None):
         tf.add_to_collection('summary_op', summary_op)
 
     elif mode == 'generate':
-      temperature = tf.placeholder(tf.float32, [])
-      softmax_flat = tf.nn.softmax(
-          tf.div(logits_flat, tf.fill([num_classes], temperature)))
-      softmax = tf.reshape(softmax_flat, [hparams.batch_size, -1, num_classes])
-
       tf.add_to_collection('inputs', inputs)
       tf.add_to_collection('encoder_inputs', encoder_inputs)
+      if hparams.dilated_cnn:
+        # ignore these
+        decoder_h0 = encoder_inputs
+        final_state = encoder_inputs
       tf.add_to_collection('initial_state', decoder_h0)
       tf.add_to_collection('final_state', final_state)
       tf.add_to_collection('temperature', temperature)

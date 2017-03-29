@@ -51,7 +51,6 @@ def _causal_conv(value,
         value has shape [batch, in_height, in_width, in_channels]
         filter_ has shape [filter_height, filter_width, in_channels, out_channels]
     """
-    print value
     in_channels = value.get_shape()[-1]
     with tf.variable_scope(name):
         weights_filter = tf.get_variable('w', [1, filter_width, in_channels, out_channels], 
@@ -111,6 +110,7 @@ def dilated_cnn_zero_state(batch_size, dilations, residual_channels):
 
 # https://github.com/ibab/tensorflow-wavenet/blob/master/wavenet/model.py
 # https://github.com/tensorflow/magenta/pull/537/files
+# TODO do something with initial_state?
 def dilated_cnn(inputs, initial_state, dilations,
         residual_channels=32,
         dilation_channels=16,

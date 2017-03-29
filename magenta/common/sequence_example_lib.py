@@ -15,7 +15,6 @@
 
 import tensorflow as tf
 
-
 def make_sequence_example(inputs, labels):
   """Returns a SequenceExample for the given inputs and labels.
 
@@ -50,6 +49,7 @@ def get_padded_batch(file_list, batch_size, input_size,
   Args:
     file_list: A list of paths to TFRecord files containing SequenceExamples.
     batch_size: The number of SequenceExamples to include in each batch.
+                If batch_size == -1, get all SequenceExamples
     input_size: The size of each input vector. The returned batch of inputs
         will have a shape [batch_size, num_steps, input_size].
     num_enqueuing_threads: The number of threads to use for enqueuing
@@ -77,7 +77,7 @@ def get_padded_batch(file_list, batch_size, input_size,
   length = tf.shape(sequence['inputs'])[0]
 
   queue = tf.PaddingFIFOQueue(
-      capacity=1000,
+      capacity=100000,
       dtypes=[tf.float32, tf.int64, tf.int32],
       shapes=[(None, input_size), (None,), ()])
 

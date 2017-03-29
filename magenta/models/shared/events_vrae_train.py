@@ -99,6 +99,7 @@ def run_eval(graph, train_dir, eval_dir, num_training_steps=None,
   loss = graph.get_collection('loss')[0]
   perplexity = graph.get_collection('perplexity')[0]
   accuracy = graph.get_collection('accuracy')[0]
+  nll = graph.get_collection('nll')[0]
   summary_op = graph.get_collection('summary_op')[0]
 
   with graph.as_default():
@@ -119,8 +120,8 @@ def run_eval(graph, train_dir, eval_dir, num_training_steps=None,
           else:
             saver.restore(sess, checkpoint_path)
 
-            global_step_, loss_, perplexity_, accuracy_, summary_op_ = sess.run(
-                [global_step, loss, perplexity, accuracy, summary_op])
+            global_step_, loss_, perplexity_, accuracy_, nll_, summary_op_ = sess.run(
+                [global_step, loss, perplexity, accuracy, nll, summary_op])
 
             tf.logging.info('Global Step: %d - '
                             'Loss: %.3f - '

@@ -50,6 +50,7 @@ py_library(
     srcs = ["events_vrae_graph.py"],
     srcs_version = "PY2AND3",
     deps = [
+        ":events_vrae_ops",
         "//magenta",
         # tensorflow dep
     ],
