@@ -76,11 +76,10 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       state_is_tuple = False
 
     with tf.variable_scope('encoder'):
-        encoder_cell = ops.make_rnn_cell(hparams.rnn_layer_sizes, 2,
-                         dropout_keep_prob=hparams.dropout_keep_prob,
-                         attn_length=0, # do not use attention on the encoder
-                         state_is_tuple=True)
-
+  	encoder_cell = make_rnn_cell(hparams.rnn_layer_sizes, 2,
+		   output_keep_prob=hparams.dropout_keep_prob,
+		   attn_length=0, # do not use attention on the encoder
+		   state_is_tuple=True)
         encoder_initial_state = encoder_cell.zero_state(hparams.batch_size, tf.float32)
 
         _, encoder_final_state = tf.nn.dynamic_rnn(
@@ -207,13 +206,15 @@ def build_graph(mode, config, sequence_example_file_paths=None):
 
       global_step = tf.Variable(0, trainable=False, name='global_step')
       # KL weight for annealing
-      # TODO only minimize the KL term when it is large enouch -- max with some gamma
-      kl_weight = 0.5*tf.tanh(0.05*(tf.cast(global_step,tf.float32)-500.))+0.5
+      kl_weight = 0.00003*tf.tanh(0.001*(tf.cast(global_step,tf.float32)-10000.))+0.00003
+      # kl_weight = 0.5*tf.tanh(0.01*(tf.cast(global_step,tf.float32)-1000.))+0.5
+      # TODO only minimize the KL term when it is large enough -- max with some gamma
       
       # "latent loss" -- KL divergence D[Q(z|x)||P(z)] where z ~ N(0,I)
       # = 1/2(tr(var) + (mu^t)(mu) - k - log|var|)
       # see Doersch tutorial page 9
       kld = 0.5 * tf.reduce_sum(tf.exp(z_logvar) + tf.square(z_mu) - 1 - z_logvar, 1)
+      # kld = -0.5 * tf.reduce_sum(1 + z_logvar - tf.square(z_mu) - tf.exp(z_logvar), 1)
       # "reconstruction loss" 
       # VR lower bound -- cross entropy is equivalent to negative log likelihood.
       # TODO scale on this?
@@ -260,8 +261,9 @@ def build_graph(mode, config, sequence_example_file_paths=None):
               'no_event_accuracy', no_event_accuracy),
           tf.summary.scalar(
               'kl_cost', tf.reduce_mean(kld)),
+          tf.summary.scalar('nll', nll),
           tf.summary.scalar(
-              'nll', nll),
+              'kl_weight', kl_weight)
       ]
 
       if mode == 'train':
@@ -274,8 +276,9 @@ def build_graph(mode, config, sequence_example_file_paths=None):
         gradients = tf.gradients(loss, params)
         clipped_gradients, _ = tf.clip_by_global_norm(gradients,
                                                       hparams.clip_norm)
-        train_op = opt.apply_gradients(zip(clipped_gradients, params),
-                                       global_step)
+  	with tf.device("/gpu:0"):
+          train_op = opt.apply_gradients(zip(clipped_gradients, params),
+                                         global_step)
         tf.add_to_collection('learning_rate', learning_rate)
         tf.add_to_collection('train_op', train_op)
 
