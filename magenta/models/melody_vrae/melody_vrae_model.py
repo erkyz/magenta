@@ -207,7 +207,6 @@ default_configs = {
             decay_rate=0.85,
             dilated_cnn=True,
             residual_channels=16,
-            dilation_channels=8,
             block_size=7,
             block_num=1,
             filter_width=3))
