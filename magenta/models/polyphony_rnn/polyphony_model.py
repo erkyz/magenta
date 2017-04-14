@@ -18,6 +18,7 @@
 import magenta
 from magenta.models.polyphony_rnn import polyphony_encoder_decoder
 from magenta.models.shared import events_rnn_model
+from magenta.models.shared import events_vrae_model
 
 
 class PolyphonyRnnModel(events_rnn_model.EventSequenceRnnModel):
@@ -82,5 +83,52 @@ default_configs = {
             initial_learning_rate=0.001,
             decay_steps=1000,
             decay_rate=0.95)),
+
+    'vrae': events_vrae_model.EventSequenceRnnConfig(
+        magenta.protobuf.generator_pb2.GeneratorDetails(
+            id='vrae',
+            description='Variational recurrent autoencoder'),
+        magenta.music.OneHotEventSequenceEncoderDecoder(
+            polyphony_encoder_decoder.PolyphonyOneHotEncoding()),
+        magenta.common.HParams(
+            batch_size=128,
+            rnn_layer_sizes=[128, 128],
+            dropout_keep_prob=0.5,
+            skip_first_n_losses=10,
+            clip_norm=5,
+            initial_learning_rate=0.001,
+            decay_steps=1000,
+            decay_rate=0.95,
+            vrae=True,
+            dilated_cnn=False,
+            output_channels=32,
+            residual_channels=16,
+            block_size=7,
+            block_num=1,
+            filter_width=3)),
+
+    'vrae_cnn': events_vrae_model.EventSequenceRnnConfig(
+        magenta.protobuf.generator_pb2.GeneratorDetails(
+            id='vrae_cnn',
+            description='Variational recurrent autoencoder with dilated \
+                    CNN decoder'),
+        magenta.music.OneHotEventSequenceEncoderDecoder(
+            polyphony_encoder_decoder.PolyphonyOneHotEncoding()),
+        magenta.common.HParams(
+            batch_size=128,
+            rnn_layer_sizes=[128, 128],
+            output_channels=32,
+            dropout_keep_prob=0.5,
+            skip_first_n_losses=10,
+            clip_norm=5,
+            initial_learning_rate=0.001,
+            decay_steps=1000,
+            decay_rate=0.95,
+            vrae=True,
+            dilated_cnn=True,
+            residual_channels=16,
+            block_size=7,
+            block_num=1,
+            filter_width=3)),
 }
 

@@ -211,7 +211,6 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       total_len = tf.shape(softmax_cross_entropy)[0]
       kld = 0.5 * tf.reduce_sum(tf.exp(z_logvar) + tf.square(z_mu) - 1 - z_logvar, 1)
       kld_tile = tf.reshape(tf.tile(tf.reshape(kld, [-1,1]), [1,total_len/hparams.batch_size]), [-1])
-      # kld = -0.5 * tf.reduce_sum(1 + z_logvar - tf.square(z_mu) - tf.exp(z_logvar), 1)
 
       # VR lower bound: reconstruction loss + kld
       # loss = (tf.reduce_sum(mask_flat * (softmax_cross_entropy \
@@ -222,8 +221,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
                     num_logits)
 
       # average across timesteps
-      perplexity = (tf.reduce_sum(mask_flat * tf.exp(softmax_cross_entropy)) /
-                    num_logits) 
+      perplexity = (tf.reduce_sum(mask_flat * tf.exp(softmax_cross_entropy)) / num_logits) 
 
       # average across sequences (batch)
       nll_across_seq = tf.reduce_sum(mask_flat * softmax_cross_entropy) / hparams.batch_size
