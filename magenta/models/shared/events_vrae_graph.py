@@ -76,8 +76,8 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       state_is_tuple = False
 
     with tf.variable_scope('encoder'):
-  	encoder_cell = make_rnn_cell(hparams.rnn_layer_sizes, 2,
-		   output_keep_prob=hparams.dropout_keep_prob,
+  	encoder_cell = ops.make_rnn_cell(hparams.rnn_layer_sizes, 2,
+		   dropout_keep_prob=hparams.dropout_keep_prob,
 		   attn_length=0, # do not use attention on the encoder
 		   state_is_tuple=True)
         encoder_initial_state = encoder_cell.zero_state(hparams.batch_size, tf.float32)
@@ -205,10 +205,14 @@ def build_graph(mode, config, sequence_example_file_paths=None):
             labels=labels_flat, logits=logits_flat)
 
       global_step = tf.Variable(0, trainable=False, name='global_step')
+
       # KL weight for annealing
-      kl_weight = 0.00003*tf.tanh(0.001*(tf.cast(global_step,tf.float32)-10000.))+0.00003
-      # kl_weight = 0.5*tf.tanh(0.01*(tf.cast(global_step,tf.float32)-1000.))+0.5
-      # TODO only minimize the KL term when it is large enough -- max with some gamma
+      # kl_weight = 0.00003*tf.tanh(0.001*(tf.cast(global_step,tf.float32)-10000.))+0.00003
+      # kl_weight = 0.5*tf.tanh(0.01*(tf.cast(global_step,tf.float32)-2000.))+0.5
+      kl_weight = 0.01 + 0.000125316*tf.cast(global_step,tf.float32)
+
+      # use linear annealing as in Zichao -- 1.0 at step 80K
+      # kl_weight = tf.minimum(0.000012375*tf.cast(global_step,tf.float32)+0.01, 1.0)
       
       # "latent loss" -- KL divergence D[Q(z|x)||P(z)] where z ~ N(0,I)
       # = 1/2(tr(var) + (mu^t)(mu) - k - log|var|)
@@ -220,7 +224,8 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       # TODO scale on this?
       reconstruction_loss = tf.reduce_sum(mask_flat * softmax_cross_entropy) / num_logits
       # average over batch
-      loss = tf.reduce_mean(reconstruction_loss + tf.maximum([1.]*hparams.batch_size,kld))
+      # loss = tf.reduce_mean(reconstruction_loss + tf.maximum([1.]*hparams.batch_size,kld))
+      loss = tf.reduce_mean(reconstruction_loss + kl_weight*kld)
       # TODO if loss is decreasing, perplexity must decrease too... hm...
       perplexity = (tf.reduce_sum(mask_flat * tf.exp(softmax_cross_entropy)) /
                     num_logits)

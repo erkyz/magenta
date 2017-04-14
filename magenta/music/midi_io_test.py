@@ -184,6 +184,32 @@ class MidiIoTest(tf.test.TestCase):
 
     self.CheckPrettyMidiAndSequence(created_midi, sequence_proto)
 
+  def testSequenceProtoToMidiFile(self):
+    # '/projects/tir2/users/ericzhu/melody_rnn/sequence_examples/lmd_dev/training_melodies.tfrecord'
+    reader = tf.python_io.tf_record_iterator('/projects/tir2/users/ericzhu/lmd_dev.tfrecord')
+    i = 0
+    serialized_sequence = reader.next():
+    ns = music_pb2.NoteSequence.FromString(serialized_sequence)
+
+    '''
+    file_queue = tf.train.string_input_producer(file_list)
+    reader = tf.TFRecordReader()
+    _, serialized_example = reader.read(file_queue)
+
+    sequence_features = {
+          'inputs': tf.FixedLenSequenceFeature(shape=[38],
+                                               dtype=tf.float32),
+          'labels': tf.FixedLenSequenceFeature(shape=[],
+                                               dtype=tf.int64)}
+
+    _, sequence = tf.parse_single_sequence_example(
+          serialized_example, sequence_features=sequence_features)
+    '''
+
+    # Translate the NoteSequence to MIDI and write to a file.
+    with open('/home/ericzhu/test.mid', "wb") as f:
+      midi_io.sequence_proto_to_midi_file(ns, f)
+
   def testSimplePrettyMidiToSequence(self):
     self.CheckMidiToSequence(self.midi_simple_filename)
 

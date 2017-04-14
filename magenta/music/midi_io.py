@@ -18,6 +18,7 @@ Input and output wrappers for converting between MIDI and other formats.
 
 from collections import defaultdict
 import sys
+import signal
 # pylint: disable=g-import-not-at-top
 if sys.version_info.major <= 2:
   from cStringIO import StringIO
@@ -47,6 +48,12 @@ _PRETTY_MIDI_MAJOR_TO_MINOR_OFFSET = 12
 class MIDIConversionError(Exception):
   pass
 
+class TimeoutException(Exception):
+  pass
+
+def timeout_handler(signum, frame):
+  tf.logging.info('timeout handler')
+  raise TimeoutException
 
 def midi_to_sequence_proto(midi_data):
   """Convert MIDI file contents to a tensorflow.magenta.NoteSequence proto.
@@ -72,14 +79,21 @@ def midi_to_sequence_proto(midi_data):
   # exceptions are raised in pretty_midi.PrettyMidi that it is cumbersome to
   # catch them all only for the purpose of error logging.
   # pylint: disable=bare-except
+  signal.signal(signal.SIGALRM, timeout_handler)
   if isinstance(midi_data, pretty_midi.PrettyMIDI):
     midi = midi_data
   else:
     try:
+      # PrettyMIDI thrashes the memory on some midi files
+      signal.alarm(2)
       midi = pretty_midi.PrettyMIDI(StringIO(midi_data))
+    except TimeoutException:
+      return None
     except:
       raise MIDIConversionError('Midi decoding error %s: %s' %
                                 (sys.exc_info()[0], sys.exc_info()[1]))
+    else:
+      signal.alarm(0)
   # pylint: enable=bare-except
 
   sequence = music_pb2.NoteSequence()

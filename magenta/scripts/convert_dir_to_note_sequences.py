@@ -25,6 +25,7 @@ Example usage:
 """
 
 import os
+import sys
 
 # internal imports
 import tensorflow as tf
@@ -70,6 +71,7 @@ def convert_directory(root_dir, sub_dir, sequence_writer, recursive=False):
   """
   dir_to_convert = os.path.join(root_dir, sub_dir)
   tf.logging.info("Converting files in '%s'.", dir_to_convert)
+  tf.logging.info(sys.version)
   files_in_dir = tf.gfile.ListDirectory(os.path.join(dir_to_convert))
   recurse_sub_dirs = []
   sequences_written = 0
@@ -95,6 +97,11 @@ def convert_directory(root_dir, sub_dir, sequence_writer, recursive=False):
 
     sequence_writer.write(sequence)
     sequences_written += 1
+    if sequences_written%500==0:
+      tf.logging.info("Converted %d files in '%s'.", sequences_written,
+                  dir_to_convert)
+      tf.logging.info('Could not parse %d files.', sequences_skipped)
+
   tf.logging.info("Converted %d files in '%s'.", sequences_written,
                   dir_to_convert)
   tf.logging.info('Could not parse %d files.', sequences_skipped)
@@ -119,6 +126,8 @@ def convert_midi(root_dir, sub_dir, full_file_path):
   try:
     sequence = midi_io.midi_to_sequence_proto(
         tf.gfile.FastGFile(full_file_path, 'rb').read())
+    if sequence is None:
+        return None
   except midi_io.MIDIConversionError as e:
     tf.logging.warning(
         'Could not parse MIDI file %s. It will be skipped. Error was: %s',
