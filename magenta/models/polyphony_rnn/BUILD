@@ -48,6 +48,7 @@ py_library(
     deps = [
         ":polyphony_encoder_decoder",
         "//magenta/models/shared:events_rnn_model",
+        "//magenta/models/shared:events_vrae_model",
         "//magenta",
         # tensorflow dep
     ],
@@ -132,6 +133,8 @@ py_binary(
         ":polyphony_model",
         "//magenta/models/shared:events_rnn_graph",
         "//magenta/models/shared:events_rnn_train",
+        "//magenta/models/shared:events_vrae_graph",
+        "//magenta/models/shared:events_vrae_train",
         # tensorflow dep
     ],
 )

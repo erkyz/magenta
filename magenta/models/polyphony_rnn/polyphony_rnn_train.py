@@ -20,7 +20,9 @@ import tensorflow as tf
 
 from magenta.models.polyphony_rnn import polyphony_model
 from magenta.models.shared import events_rnn_graph
+from magenta.models.shared import events_vrae_graph
 from magenta.models.shared import events_rnn_train
+from magenta.models.shared import events_vrae_train
 
 FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('run_dir', '/tmp/polyphony_rnn/logdir/run1',
@@ -79,9 +81,12 @@ def main(unused_argv):
   config.hparams.parse(FLAGS.hparams)
 
   mode = 'eval' if FLAGS.eval else 'train'
-  tf.logging.info('sequence_example_file', sequence_example_file)
-  graph = events_rnn_graph.build_graph(
-      mode, config, sequence_example_file)
+  if config.hparams.vrae:
+      graph = events_vrae_graph.build_graph(
+          mode, config, sequence_example_file)
+  else:
+      graph = events_rnn_graph.build_graph(
+          mode, config, sequence_example_file)
 
   train_dir = os.path.join(run_dir, 'train')
   tf.gfile.MakeDirs(train_dir)
@@ -91,11 +96,20 @@ def main(unused_argv):
     eval_dir = os.path.join(run_dir, 'eval')
     tf.gfile.MakeDirs(eval_dir)
     tf.logging.info('Eval dir: %s', eval_dir)
-    events_rnn_train.run_eval(graph, train_dir, eval_dir,
+    if config.hparams.vrae:
+        events_vrae_train.run_eval(graph, train_dir, eval_dir,
+                              FLAGS.num_training_steps, FLAGS.summary_frequency)
+    else:
+        events_rnn_train.run_eval(graph, train_dir, eval_dir,
                               FLAGS.num_training_steps, FLAGS.summary_frequency)
 
+
   else:
-    events_rnn_train.run_training(graph, train_dir, FLAGS.num_training_steps,
+    if config.hparams.vrae:
+        events_vrae_train.run_training(graph, train_dir, FLAGS.num_training_steps,
+                                  FLAGS.summary_frequency)
+    else:
+        events_rnn_train.run_training(graph, train_dir, FLAGS.num_training_steps,
                                   FLAGS.summary_frequency)
 
 

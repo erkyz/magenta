@@ -100,13 +100,9 @@ def build_graph(mode, config, sequence_example_file_paths=None):
             epsilon = tf.random_normal(tf.shape(z_logvar), 0, 1, dtype=tf.float32)
             z = z_mu + tf.mul(tf.sqrt(tf.exp(z_logvar)), epsilon)
             dilations = [2**i for i in range(hparams.block_size)] * hparams.block_num
-            zero_state = ops.dilated_cnn_zero_state(
-                    hparams.batch_size, dilations, hparams.residual_channels)
-            outputs, final_state = ops.dilated_cnn(
-                    inputs, zero_state,
+            outputs, final_state = ops.dilated_cnn(inputs, 
                     dilations=dilations,
                     residual_channels=hparams.residual_channels, 
-                    dilation_channels=hparams.dilation_channels,
                     output_channels=hparams.output_channels,
                     global_condition=z,
                     filter_width=hparams.filter_width,
@@ -197,7 +193,6 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       mask = tf.cast(mask, tf.float32)
       mask_flat = tf.reshape(mask, [-1])
       num_logits = tf.to_float(tf.reduce_sum(lengths))
-      num_sequences = tf.to_float(tf.shape(lengths)[0])
 
       with tf.control_dependencies(
           [tf.Assert(tf.greater(num_logits, 0.), [num_logits])]):
@@ -217,7 +212,9 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       # "latent loss" -- KL divergence D[Q(z|x)||P(z)] where z ~ N(0,I)
       # = 1/2(tr(var) + (mu^t)(mu) - k - log|var|)
       # see Doersch tutorial page 9
+      total_len = tf.shape(softmax_cross_entropy)[0]
       kld = 0.5 * tf.reduce_sum(tf.exp(z_logvar) + tf.square(z_mu) - 1 - z_logvar, 1)
+
       # kld = -0.5 * tf.reduce_sum(1 + z_logvar - tf.square(z_mu) - tf.exp(z_logvar), 1)
       # "reconstruction loss" 
       # VR lower bound -- cross entropy is equivalent to negative log likelihood.
@@ -226,12 +223,22 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       # average over batch
       # loss = tf.reduce_mean(reconstruction_loss + tf.maximum([1.]*hparams.batch_size,kld))
       loss = tf.reduce_mean(reconstruction_loss + kl_weight*kld)
-      # TODO if loss is decreasing, perplexity must decrease too... hm...
-      perplexity = (tf.reduce_sum(mask_flat * tf.exp(softmax_cross_entropy)) /
+      
+      kld_tile = tf.reshape(tf.tile(tf.reshape(kld, [-1,1]), [1,total_len/hparams.batch_size]), [-1])
+
+      # VR lower bound: reconstruction loss + kld
+      # loss = (tf.reduce_sum(mask_flat * (softmax_cross_entropy \
+              # + tf.maximum(tf.tile([1.],[total_len]),kld_tile))) /
+                    # num_logits)
+      loss = (tf.reduce_sum(mask_flat * (softmax_cross_entropy \
+              + kl_weight*kld_tile)) /
                     num_logits)
 
-      # average over sequences
-      nll = tf.reduce_sum(mask_flat * softmax_cross_entropy) / num_sequences
+      # average across timesteps
+      perplexity = (tf.reduce_sum(mask_flat * tf.exp(softmax_cross_entropy)) / num_logits) 
+
+      # average across sequences (batch)
+      nll_across_seq = tf.reduce_sum(mask_flat * softmax_cross_entropy) / hparams.batch_size
 
       correct_predictions = tf.to_float(
           tf.nn.in_top_k(logits_flat, labels_flat, 1)) * mask_flat
@@ -252,7 +259,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
 
       tf.add_to_collection('loss', loss)
       tf.add_to_collection('perplexity', perplexity)
-      tf.add_to_collection('nll', nll)
+      tf.add_to_collection('nll_across_seq', nll_across_seq)
       tf.add_to_collection('accuracy', accuracy)
       tf.add_to_collection('global_step', global_step)
 
@@ -266,7 +273,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
               'no_event_accuracy', no_event_accuracy),
           tf.summary.scalar(
               'kl_cost', tf.reduce_mean(kld)),
-          tf.summary.scalar('nll', nll),
+          tf.summary.scalar('nll_across_seq', nll_across_seq),
           tf.summary.scalar(
               'kl_weight', kl_weight)
       ]
@@ -281,8 +288,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
         gradients = tf.gradients(loss, params)
         clipped_gradients, _ = tf.clip_by_global_norm(gradients,
                                                       hparams.clip_norm)
-  	with tf.device("/gpu:0"):
-          train_op = opt.apply_gradients(zip(clipped_gradients, params),
+        train_op = opt.apply_gradients(zip(clipped_gradients, params),
                                          global_step)
         tf.add_to_collection('learning_rate', learning_rate)
         tf.add_to_collection('train_op', train_op)
@@ -299,8 +305,8 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       tf.add_to_collection('encoder_inputs', encoder_inputs)
       if hparams.dilated_cnn:
         # ignore these
-        decoder_h0 = encoder_inputs
-        final_state = encoder_inputs
+        decoder_h0 = encoder_initial_state
+        final_state = encoder_initial_state
       tf.add_to_collection('initial_state', decoder_h0)
       tf.add_to_collection('final_state', final_state)
       tf.add_to_collection('temperature', temperature)

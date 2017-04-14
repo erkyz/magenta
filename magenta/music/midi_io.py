@@ -74,6 +74,8 @@ def midi_to_sequence_proto(midi_data):
     MIDIConversionError: An improper MIDI mode was supplied.
   """
 
+  signal.signal(signal.SIGALRM, timeout_handler)
+
   # In practice many MIDI files cannot be decoded with pretty_midi. Catch all
   # errors here and try to log a meaningful message. So many different
   # exceptions are raised in pretty_midi.PrettyMidi that it is cumbersome to
@@ -83,6 +85,7 @@ def midi_to_sequence_proto(midi_data):
   if isinstance(midi_data, pretty_midi.PrettyMIDI):
     midi = midi_data
   else:
+    signal.alarm(1)
     try:
       # PrettyMIDI thrashes the memory on some midi files
       signal.alarm(2)
@@ -90,6 +93,7 @@ def midi_to_sequence_proto(midi_data):
     except TimeoutException:
       return None
     except:
+      tf.logging.info('eh')
       raise MIDIConversionError('Midi decoding error %s: %s' %
                                 (sys.exc_info()[0], sys.exc_info()[1]))
     else:

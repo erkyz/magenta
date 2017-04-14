@@ -73,10 +73,12 @@ def convert_directory(root_dir, sub_dir, sequence_writer, recursive=False):
   tf.logging.info("Converting files in '%s'.", dir_to_convert)
   tf.logging.info(sys.version)
   files_in_dir = tf.gfile.ListDirectory(os.path.join(dir_to_convert))
+  tf.logging.info(len(files_in_dir))
   recurse_sub_dirs = []
   sequences_written = 0
   sequences_skipped = 0
   for file_in_dir in files_in_dir:
+    tf.logging.info(file_in_dir)
     full_file_path = os.path.join(dir_to_convert, file_in_dir)
     if tf.gfile.IsDirectory(full_file_path):
       if recursive:
@@ -99,7 +101,7 @@ def convert_directory(root_dir, sub_dir, sequence_writer, recursive=False):
     sequences_written += 1
     if sequences_written%500==0:
       tf.logging.info("Converted %d files in '%s'.", sequences_written,
-                  dir_to_convert)
+                      dir_to_convert)
       tf.logging.info('Could not parse %d files.', sequences_skipped)
 
   tf.logging.info("Converted %d files in '%s'.", sequences_written,
@@ -178,6 +180,7 @@ def main(unused_argv):
 
   input_dir = os.path.expanduser(FLAGS.input_dir)
   output_file = os.path.expanduser(FLAGS.output_file)
+  tf.logging.info(output_file)
 
   if not os.path.exists(os.path.dirname(output_file)):
     os.makedirs(os.path.dirname(output_file))

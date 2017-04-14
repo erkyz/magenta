@@ -66,54 +66,47 @@ def _causal_conv(value,
         return conv
 
 def _create_dilation_layer(input_batch, layer_idx, dilation, global_condition_batch, 
-        filter_width, residual_channels, dilation_channels, is_training):
+        filter_width, residual_channels, is_training):
     # Each layer is wrapped in a residual block.
     # TODO layer norms, gated activation unit instead of ReLU
-    # TODO add global condition
     # concatenating z with every word embedding of the decoder input.
 
-    # ReLU 1x1 512
+    # ReLU 1x1
     relu1 = tf.nn.relu(input_batch, name='relu1_layer{}'.format(layer_idx))
     conv1 = _causal_conv(relu1, 
             filter_width=1, 
-            out_channels=dilation_channels,
+            out_channels=residual_channels,
             dilation=1,
             name='conv1d_1_layer{}'.format(layer_idx))
     conv1 = conv1 + _causal_conv(global_condition_batch,
                         filter_width=1,
-                        out_channels=dilation_channels,
+                        out_channels=residual_channels,
                         dilation=1,
                         name='gc_filter_layer{}'.format(layer_idx))
 
-    # ReLU 1xk 512
+    # ReLU 1xk
     relu2 = tf.nn.relu(conv1, name='relu2_layer{}'.format(layer_idx))
     conv2 = _causal_conv(relu2, 
             filter_width=filter_width,
-            out_channels=dilation_channels,
+            out_channels=residual_channels,
             dilation=dilation,
             name='dilated_conv_layer{}'.format(layer_idx))
 
-    # ReLU 1x1 1024
+    # ReLU 1x1 
     relu3 = tf.nn.relu(conv2, name='relu3_layer{}'.format(layer_idx))
     conv3 = _causal_conv(relu3, 
             filter_width=1,
-            out_channels=residual_channels,
+            out_channels=2*residual_channels,
             dilation=1,
             name='conv1d_2_layer{}'.format(layer_idx))
    
     # "dense output"
     return input_batch + conv3
 
-def dilated_cnn_zero_state(batch_size, dilations, residual_channels):
-    initial_state = tf.zeros([batch_size,sum(dilations)*residual_channels])
-    return initial_state
-
 # https://github.com/ibab/tensorflow-wavenet/blob/master/wavenet/model.py
 # https://github.com/tensorflow/magenta/pull/537/files
-# TODO do something with initial_state?
-def dilated_cnn(inputs, initial_state, dilations,
-        residual_channels=32,
-        dilation_channels=16,
+def dilated_cnn(inputs, dilations,
+        residual_channels=512,
         output_channels=128,
         global_condition=None, 
         filter_width=3,
@@ -128,10 +121,6 @@ def dilated_cnn(inputs, initial_state, dilations,
     batch_size = input_shape[0]
     input_size = input_shape[2]
 
-    # get prefix-sums of dilation
-    dlt_sum = [sum(dilations[:i]) for i in range(len(dilations))]
-    dlt_sum.append(sum(dilations))
-
     # TODO for completeness, include case where global_condition = None
     # [batch size, 1, 1, channels]
     global_condition_channels = global_condition.get_shape().as_list()[1]
@@ -140,13 +129,11 @@ def dilated_cnn(inputs, initial_state, dilations,
 
     # Pre-process the input with a regular convolution (create causal layer)
     # Note: num_steps = in_width, input_size = in_channels. That makes sense.
-    # Unlike ByteNet, we have a hidden dilation size (dilation_channels), which
-    # necessitates this intermediate convolution
     inputs_batch = tf.reshape(inputs, [batch_size,1,-1,input_size])
     current_layer = _causal_conv(
             inputs_batch,
             filter_width=filter_width,
-            out_channels=residual_channels,
+            out_channels=2*residual_channels,
             dilation=1,
             name='causal_layer')
 
@@ -169,7 +156,7 @@ def dilated_cnn(inputs, initial_state, dilations,
 
             layer_output = _create_dilation_layer(
                     h, i, dilation, global_condition_batch, 
-                    filter_width, residual_channels, dilation_channels,
+                    filter_width, residual_channels, 
                     (mode == 'train'))
             current_layer = layer_output
 
