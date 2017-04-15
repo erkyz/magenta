@@ -178,10 +178,6 @@ def build_graph(mode, config, sequence_example_file_paths=None):
         # unscaled
         logits_flat = tf.contrib.layers.linear(outputs_flat, num_classes)
 
-    temperature = tf.placeholder(tf.float32, []) if mode == 'generate' else 1.0
-    softmax_flat = tf.nn.softmax(
-        tf.div(logits_flat, tf.fill([num_classes], temperature)))
-    softmax = tf.reshape(softmax_flat, [hparams.batch_size, -1, num_classes])
 
     if mode == 'train' or mode == 'eval':
       labels_flat = tf.reshape(labels, [-1])
@@ -301,14 +297,16 @@ def build_graph(mode, config, sequence_example_file_paths=None):
         tf.add_to_collection('summary_op', summary_op)
 
     elif mode == 'generate':
+      temperature = tf.placeholder(tf.float32, []) 
+      softmax_flat = tf.nn.softmax(
+	    tf.div(logits_flat, tf.fill([num_classes], temperature)))
+      softmax = tf.reshape(softmax_flat, [hparams.batch_size, -1, num_classes])
+
       tf.add_to_collection('inputs', inputs)
       tf.add_to_collection('encoder_inputs', encoder_inputs)
-      if hparams.dilated_cnn:
-        # ignore these
-        decoder_h0 = encoder_initial_state
-        final_state = encoder_initial_state
-      tf.add_to_collection('initial_state', decoder_h0)
-      tf.add_to_collection('final_state', final_state)
+      if not hparams.dilated_cnn:
+	  tf.add_to_collection('initial_state', decoder_h0)
+	  tf.add_to_collection('final_state', final_state)
       tf.add_to_collection('temperature', temperature)
       tf.add_to_collection('softmax', softmax)
       tf.add_to_collection('z_logvar', z_logvar)

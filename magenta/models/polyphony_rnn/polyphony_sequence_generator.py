@@ -47,7 +47,8 @@ class PolyphonyRnnSequenceGenerator(mm.BaseSequenceGenerator):
     super(PolyphonyRnnSequenceGenerator, self).__init__(
         model, details, steps_per_quarter, checkpoint, bundle)
 
-  def _generate(self, input_sequence, generator_options):
+  def _generate(self, input_sequence, generator_options, 
+          encoder_sequence=None):
     if len(generator_options.input_sections) > 1:
       raise mm.SequenceGeneratorException(
           'This model supports at most one input_sections message, but got %s' %
@@ -94,6 +95,13 @@ class PolyphonyRnnSequenceGenerator(mm.BaseSequenceGenerator):
         quantized_primer_sequence, start_step=input_start_step)
     assert len(extracted_seqs) <= 1
 
+    extracted_encoder_sequence = None
+    if encoder_sequence:
+        quantized_encoder_sequence = mm.quantize_note_sequence(
+            encoder_sequence, self.steps_per_quarter)
+	extracted_encoder_seqs, _ = polyphony_lib.extract_polyphonic_sequences(
+	    quantized_encoder_sequence)
+
     generate_start_step = mm.quantize_to_step(
         generate_section.start_time, steps_per_second)
     # Note that when quantizing end_step, we set quantize_cutoff to 1.0 so it
@@ -112,6 +120,11 @@ class PolyphonyRnnSequenceGenerator(mm.BaseSequenceGenerator):
           steps_per_quarter=(
               quantized_primer_sequence.quantization_info.steps_per_quarter),
           start_step=generate_start_step)
+
+    if extracted_encoder_seqs and extracted_encoder_seqs[0]:
+      encoder_seq = extracted_encoder_seqs[0]
+    else: 
+      encoder_seq = None
 
     # Ensure that the track extends up to the step we want to start generating.
     poly_seq.set_length(generate_start_step - poly_seq.start_step)
@@ -169,7 +182,7 @@ class PolyphonyRnnSequenceGenerator(mm.BaseSequenceGenerator):
           'Need to generate %d more steps for this sequence, will try asking '
           'for %d RNN steps' % (steps_to_gen, rnn_steps_to_gen))
       poly_seq = self._model.generate_polyphonic_sequence(
-          len(poly_seq) + rnn_steps_to_gen, poly_seq, **args)
+          len(poly_seq) + rnn_steps_to_gen, poly_seq, encoder_seq, **args)
     poly_seq.set_length(total_steps)
 
     if generator_options.args['condition_on_primer'].bool_value:

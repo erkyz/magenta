@@ -21,11 +21,11 @@ from magenta.models.shared import events_rnn_model
 from magenta.models.shared import events_vrae_model
 
 
-class PolyphonyRnnModel(events_rnn_model.EventSequenceRnnModel):
+class PolyphonyRnnModel(events_vrae_model.EventSequenceVraeModel):
   """Class for RNN polyphonic sequence generation models."""
 
   def generate_polyphonic_sequence(
-      self, num_steps, primer_sequence, temperature=1.0, beam_size=1,
+      self, num_steps, primer_sequence, encoder_sequence, temperature=1.0, beam_size=1,
       branch_factor=1, steps_per_iteration=1, modify_events_callback=None):
     """Generate a polyphonic track from a primer polyphonic track.
 
@@ -50,7 +50,7 @@ class PolyphonyRnnModel(events_rnn_model.EventSequenceRnnModel):
       The generated PolyphonicSequence object (which begins with the provided
       primer track).
     """
-    return self._generate_events(num_steps, primer_sequence, temperature,
+    return self._generate_events(num_steps, primer_sequence, encoder_sequence, temperature,
                                  beam_size, branch_factor, steps_per_iteration,
                                  modify_events_callback=modify_events_callback)
 

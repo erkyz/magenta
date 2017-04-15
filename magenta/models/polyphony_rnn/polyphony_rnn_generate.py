@@ -76,6 +76,10 @@ tf.app.flags.DEFINE_string(
     'primer_midi', '',
     'The path to a MIDI file containing a polyphonic track that will be used '
     'as a priming track.')
+tf.app.flags.DEFINE_string(
+    'encoder_midi', '',
+    'The path to a MIDI file containing a melody that will be used as a '
+    'by the encoder to generate a latent variable z.')
 tf.app.flags.DEFINE_boolean(
     'condition_on_primer', False,
     'If set, the RNN will receive the primer as its input before it begins '
@@ -111,7 +115,11 @@ tf.app.flags.DEFINE_string(
     'log', 'INFO',
     'The threshold for what messages will be logged DEBUG, INFO, WARN, ERROR, '
     'or FATAL.')
-
+tf.app.flags.DEFINE_string(
+    'hparams', '{}',
+    'String representation of a Python dictionary containing hyperparameter '
+    'to value mapping. This mapping is merged with the default '
+    'hyperparameters.')
 
 def get_checkpoint():
   """Get the training dir or checkpoint path to be used by the model."""
@@ -177,6 +185,12 @@ def run_with_flags(generator):
 
   primer_sequence = None
   qpm = FLAGS.qpm if FLAGS.qpm else magenta.music.DEFAULT_QUARTERS_PER_MINUTE
+
+  encoder_midi, encoder_sequence = None, None
+  if FLAGS.encoder_midi:
+    encoder_midi = os.path.expanduser(FLAGS.encoder_midi)
+    encoder_sequence = magenta.music.midi_file_to_sequence_proto(encoder_midi)
+
   if FLAGS.primer_pitches:
     primer_sequence = music_pb2.NoteSequence()
     primer_sequence.tempos.add().qpm = qpm
@@ -241,7 +255,8 @@ def run_with_flags(generator):
   date_and_time = time.strftime('%Y-%m-%d_%H%M%S')
   digits = len(str(FLAGS.num_outputs))
   for i in range(FLAGS.num_outputs):
-    generated_sequence = generator.generate(primer_sequence, generator_options)
+    generated_sequence = generator.generate(primer_sequence, 
+            generator_options, encoder_sequence)
 
     midi_filename = '%s_%s.mid' % (date_and_time, str(i + 1).zfill(digits))
     midi_path = os.path.join(output_dir, midi_filename)
@@ -256,6 +271,7 @@ def main(unused_argv):
   tf.logging.set_verbosity(FLAGS.log)
 
   config = polyphony_model.default_configs[FLAGS.config]
+  config.hparams.parse(FLAGS.hparams)
 
   generator = polyphony_sequence_generator.PolyphonyRnnSequenceGenerator(
       model=polyphony_model.PolyphonyRnnModel(config),

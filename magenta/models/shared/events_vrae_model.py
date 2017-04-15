@@ -87,28 +87,41 @@ class EventSequenceVraeModel(mm.BaseModel):
 
     graph_inputs = self._session.graph.get_collection('inputs')[0]
     graph_encoder_inputs = self._session.graph.get_collection('encoder_inputs')[0]
-    graph_initial_state = self._session.graph.get_collection('initial_state')[0]
-    graph_final_state = self._session.graph.get_collection('final_state')[0]
     graph_softmax = self._session.graph.get_collection('softmax')[0]
     graph_temperature = self._session.graph.get_collection('temperature')
 
-    feed_dict = {graph_inputs: inputs, graph_encoder_inputs: encoder_inputs,
+    if not self._config.hparams.dilated_cnn:
+    	graph_initial_state = self._session.graph.get_collection('initial_state')[0]
+	graph_final_state = self._session.graph.get_collection('final_state')[0]
+    	feed_dict = {graph_inputs: inputs, graph_encoder_inputs: encoder_inputs,
             graph_initial_state: initial_state}
+    else:
+    	feed_dict = {graph_inputs: inputs, graph_encoder_inputs: encoder_inputs}
+
+
     # For backwards compatibility, we only try to pass temperature if the
     # placeholder exists in the graph.
     if graph_temperature:
       feed_dict[graph_temperature[0]] = temperature
-    final_state, softmax = self._session.run(
-        [graph_final_state, graph_softmax], feed_dict)
-
-    if softmax.shape[1] > 1:
-      # The inputs batch is longer than a single step, so we also want to
-      # compute the log-likelihood of the event sequences up until the step
-      # we're generating.
-      loglik = self._config.encoder_decoder.evaluate_log_likelihood(
-              event_sequences, softmax[:, :-1, :])
+    if not self._config.hparams.dilated_cnn:
+	final_state, softmax = self._session.run(
+	    [graph_final_state, graph_softmax], feed_dict)
     else:
-      loglik = np.zeros(len(event_sequences))
+	final_state = None
+	softmax = self._session.run(
+	    [graph_softmax], feed_dict)
+
+    # TODO
+    # if softmax.shape[1] > 1:
+      # # The inputs batch is longer than a single step, so we also want to
+      # # compute the log-likelihood of the event sequences up until the step
+      # # we're generating.
+      # loglik = self._config.encoder_decoder.evaluate_log_likelihood(
+              # event_sequences, softmax[:, :-1, :])
+    # else:
+    loglik = np.zeros(len(event_sequences))
+
+    softmax = softmax[0]
 
     indices = self._config.encoder_decoder.extend_event_sequences(
         event_sequences, softmax)
@@ -307,7 +320,8 @@ class EventSequenceVraeModel(mm.BaseModel):
     """
     event_sequences = [copy.deepcopy(events) for _ in range(beam_size)]
     encoder_event_sequences = [encoder_events for _ in range(beam_size)]
-    graph_initial_state = self._session.graph.get_collection('initial_state')[0]
+    if not self._config.hparams.dilated_cnn:
+      graph_initial_state = self._session.graph.get_collection('initial_state')[0]
     loglik = np.zeros(beam_size)
 
     # Choose the number of steps for the first iteration such that subsequent
@@ -334,9 +348,12 @@ class EventSequenceVraeModel(mm.BaseModel):
     graph_inputs = self._session.graph.get_collection('inputs')[0]
     # note: graph_inputs not reached by initial_state
     feed_dict = {graph_encoder_inputs: encoder_inputs, graph_inputs: inputs}
-    initial_state_, z_mu_ = self._session.run([graph_initial_state, graph_z_mu], feed_dict)
-    print z_mu_
-    initial_state = np.tile(initial_state_, (beam_size, 1))
+    initial_state = None
+    if not self._config.hparams.dilated_cnn:
+      initial_state_, z_mu_ = self._session.run([graph_initial_state, z_mu], feed_dict)
+      initial_state = np.tile(initial_state_, (beam_size, 1))
+    else:
+      z_mu_ = self._session.run([graph_z_mu], feed_dict)
     event_sequences, final_state, loglik = self._generate_branches(
         event_sequences, loglik, branch_factor, first_iteration_num_steps,
         inputs, encoder_inputs, initial_state, temperature)
@@ -352,7 +369,11 @@ class EventSequenceVraeModel(mm.BaseModel):
         inputs = self._config.encoder_decoder.get_inputs_batch(
             control_events, event_sequences)
       else:
-        inputs = self._config.encoder_decoder.get_inputs_batch(event_sequences)
+        inputs = self._config.encoder_decoder.get_inputs_batch(event_sequences,
+                full_length=True)
+
+      # tf.logging.info(len(inputs[0]))
+      # tf.logging.info(len(event_sequences[0]))
 
       if modify_events_callback:
         modify_events_callback(
