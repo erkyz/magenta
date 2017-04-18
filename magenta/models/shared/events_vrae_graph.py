@@ -311,5 +311,6 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       tf.add_to_collection('softmax', softmax)
       tf.add_to_collection('z_logvar', z_logvar)
       tf.add_to_collection('z_mu', z_mu)
+      tf.add_to_collection('z', z)
 
   return graph

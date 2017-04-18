@@ -57,7 +57,7 @@ class EventSequenceVraeModel(mm.BaseModel):
   def _build_graph_for_generation(self):
     return events_vrae_graph.build_graph('generate', self._config)
 
-  def _generate_step_for_batch(self, event_sequences, inputs, encoder_inputs,
+  def _generate_step_for_batch(self, event_sequences, inputs, encoder_inputs, z,
           initial_state, temperature):
     """Extends a batch of event sequences by a single step each.
 
@@ -85,6 +85,7 @@ class EventSequenceVraeModel(mm.BaseModel):
     """
     assert len(event_sequences) == self._config.hparams.batch_size
 
+    graph_z = self._session.graph.get_collection('z')[0]
     graph_inputs = self._session.graph.get_collection('inputs')[0]
     graph_encoder_inputs = self._session.graph.get_collection('encoder_inputs')[0]
     graph_softmax = self._session.graph.get_collection('softmax')[0]
@@ -94,9 +95,10 @@ class EventSequenceVraeModel(mm.BaseModel):
     	graph_initial_state = self._session.graph.get_collection('initial_state')[0]
 	graph_final_state = self._session.graph.get_collection('final_state')[0]
     	feed_dict = {graph_inputs: inputs, graph_encoder_inputs: encoder_inputs,
-            graph_initial_state: initial_state}
+                graph_initial_state: initial_state, graph_z: z}
     else:
-    	feed_dict = {graph_inputs: inputs, graph_encoder_inputs: encoder_inputs}
+        feed_dict = {graph_inputs: inputs, graph_encoder_inputs: encoder_inputs, 
+                graph_z: z}
 
 
     # For backwards compatibility, we only try to pass temperature if the
@@ -129,7 +131,7 @@ class EventSequenceVraeModel(mm.BaseModel):
 
     return final_state, loglik + np.log(p)
 
-  def _generate_step(self, event_sequences, inputs, encoder_inputs, 
+  def _generate_step(self, event_sequences, inputs, encoder_inputs, z,
           initial_state, temperature):
     """Extends a list of event sequences by a single step each.
 
@@ -166,6 +168,7 @@ class EventSequenceVraeModel(mm.BaseModel):
           [event_sequences[i] for i in batch_indices],
           [inputs[i] for i in batch_indices],
           [encoder_inputs[i] for i in batch_indices],
+          z,
           initial_state[batch_indices, :],
           temperature)
       final_state[batch_indices, :] = batch_final_state
@@ -183,6 +186,7 @@ class EventSequenceVraeModel(mm.BaseModel):
               copy.deepcopy(event_sequences[-1]) for _ in range(pad_size)],
           [inputs[i] for i in batch_indices] + inputs[-1] * pad_size,
           [encoder_inputs[i] for i in batch_indices],
+          z,
           np.append(initial_state[batch_indices, :],
                     np.tile(inputs[-1, :], (pad_size, 1)),
                     axis=0),
@@ -193,7 +197,7 @@ class EventSequenceVraeModel(mm.BaseModel):
     return final_state, loglik
 
   def _generate_branches(self, event_sequences, loglik, branch_factor,
-                         num_steps, inputs, encoder_inputs, initial_state, 
+                         num_steps, inputs, encoder_inputs, z, initial_state, 
                          temperature):
     """Performs a single iteration of branch generation for beam search.
 
@@ -233,7 +237,7 @@ class EventSequenceVraeModel(mm.BaseModel):
 
     for _ in range(num_steps):
       all_final_state, all_step_loglik = self._generate_step(
-          all_event_sequences, all_inputs, all_encoder_inputs, 
+          all_event_sequences, all_inputs, all_encoder_inputs, z,
           all_final_state, temperature)
       all_loglik += all_step_loglik
 
@@ -344,19 +348,27 @@ class EventSequenceVraeModel(mm.BaseModel):
           self._config.encoder_decoder, event_sequences, inputs)
 
     graph_z_mu = self._session.graph.get_collection('z_mu')
+    graph_z_logvar = self._session.graph.get_collection('z_logvar')
     graph_encoder_inputs = self._session.graph.get_collection('encoder_inputs')[0]
     graph_inputs = self._session.graph.get_collection('inputs')[0]
     # note: graph_inputs not reached by initial_state
     feed_dict = {graph_encoder_inputs: encoder_inputs, graph_inputs: inputs}
     initial_state = None
     if not self._config.hparams.dilated_cnn:
-      initial_state_, z_mu_ = self._session.run([graph_initial_state, z_mu], feed_dict)
+      initial_state_, z_mu, z_logvar = self._session.run(
+              [graph_initial_state, graph_z_mu, graph_z_logvar], feed_dict)
       initial_state = np.tile(initial_state_, (beam_size, 1))
     else:
-      z_mu_ = self._session.run([graph_z_mu], feed_dict)
+      z_mu, z_logvar = self._session.run([graph_z_mu, graph_z_logvar], feed_dict)
+   
+    z_mu = np.asarray(z_mu)
+    z_logvar = np.asarray(z_logvar)
+    epsilon = np.random.normal(0, 1, np.shape(z_logvar))
+    z = (z_mu + np.sqrt(np.exp(z_logvar)) * epsilon)[0]
+
     event_sequences, final_state, loglik = self._generate_branches(
         event_sequences, loglik, branch_factor, first_iteration_num_steps,
-        inputs, encoder_inputs, initial_state, temperature)
+        inputs, encoder_inputs, z, initial_state, temperature)
 
     num_iterations = (num_steps -
                       first_iteration_num_steps) / steps_per_iteration
@@ -372,16 +384,13 @@ class EventSequenceVraeModel(mm.BaseModel):
         inputs = self._config.encoder_decoder.get_inputs_batch(event_sequences,
                 full_length=True)
 
-      # tf.logging.info(len(inputs[0]))
-      # tf.logging.info(len(event_sequences[0]))
-
       if modify_events_callback:
         modify_events_callback(
             self._config.encoder_decoder, event_sequences, inputs)
 
       event_sequences, final_state, loglik = self._generate_branches(
           event_sequences, loglik, branch_factor, steps_per_iteration, inputs,
-          encoder_inputs, final_state, temperature)
+          encoder_inputs, z, final_state, temperature)
 
     # Prune to a single sequence.
     event_sequences, final_state, loglik = self._prune_branches(
