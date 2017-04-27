@@ -18,9 +18,8 @@ import tensorflow as tf
 import magenta
 import magenta.models.shared.events_vrae_ops as ops
 
-TEMP_LATENT_DIM = 10
 TEMP_HIDDEN_SIZE = 64
-TRAIN_BATCH_SIZE = 64 #TODO save properly
+TRAIN_BATCH_SIZE = 64 #TODO save properly. only for attention
 
 def build_graph(mode, config, sequence_example_file_paths=None):
   """Builds the TensorFlow graph.
@@ -75,6 +74,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       # TODO this is hacky af. also where is this happening?
       state_is_tuple = False
 
+
     with tf.variable_scope('encoder'):
   	encoder_cell = ops.make_rnn_cell(hparams.rnn_layer_sizes, 2,
 		   dropout_keep_prob=hparams.dropout_keep_prob,
@@ -90,9 +90,9 @@ def build_graph(mode, config, sequence_example_file_paths=None):
         # We only look at the hidden state of the last layer of the encoder LSTM
         encoder_final_hidden_state = encoder_final_state[-1].h
         z_mu = tf.contrib.layers.fully_connected(encoder_final_hidden_state, 
-                num_outputs=TEMP_LATENT_DIM, activation_fn=None, trainable=True) 
+                num_outputs=hparams.z_dim, activation_fn=None, trainable=True)
         z_logvar = tf.contrib.layers.fully_connected(encoder_final_hidden_state, 
-                num_outputs=TEMP_LATENT_DIM, activation_fn=None, trainable=True)
+                num_outputs=hparams.z_dim, activation_fn=None, trainable=True)
 
     # decoder
     with tf.variable_scope('decoder'):
@@ -143,7 +143,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
                 # take z_mu, z_logvar from last batch input since batch_size is 1 for gen
                 epsilon = tf.random_normal(tf.shape(z_logvar[-1]), 0, 1, dtype=tf.float32)
                 z = z_mu[-1] + tf.mul(tf.sqrt(tf.exp(z_logvar[-1])), epsilon)
-                z = tf.reshape(z, [1, TEMP_LATENT_DIM])
+                z = tf.reshape(z, [1, hparams.z_dim])
                 hidden1 = tf.contrib.layers.fully_connected(z, 
                         num_outputs=TEMP_HIDDEN_SIZE,
                         trainable=True)
@@ -197,15 +197,16 @@ def build_graph(mode, config, sequence_example_file_paths=None):
 
       global_step = tf.Variable(0, trainable=False, name='global_step')
 
-      # KL weight for annealing
-      # kl_weight = 0.00003*tf.tanh(0.001*(tf.cast(global_step,tf.float32)-10000.))+0.00003
-      # kl_weight = 0.5*tf.tanh(0.01*(tf.cast(global_step,tf.float32)-2000.))+0.5
-      # kl_weight = 0.01 + 0.000125316*tf.cast(global_step,tf.float32)
-      kl_weight = 0.015
-
-      # use linear annealing as in Zichao -- 1.0 at step 80K
-      # kl_weight = tf.minimum(0.000012375*tf.cast(global_step,tf.float32)+0.01, 1.0)
-      
+      if mode == 'train':
+	if hparams.anneal:
+	  # linear annealing to step hparams.anneal
+          kl_weight = tf.minimum(tf.cast(global_step, tf.float32)/hparams.anneal, 1.0)
+      	  # kl_weight = tf.minimum(0.000012375*tf.cast(global_step,tf.float32)+0.01, 1.0)
+  	else:
+      	  kl_weight = 0.015
+      else:
+	kl_weight = 1.0     
+ 
       # "latent loss" -- KL divergence D[Q(z|x)||P(z)] where z ~ N(0,I)
       # = 1/2(tr(var) + (mu^t)(mu) - k - log|var|)
       # see Doersch tutorial page 9
@@ -234,8 +235,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       # average across timesteps
       perplexity = (tf.reduce_sum(mask_flat * tf.exp(softmax_cross_entropy)) / num_logits) 
 
-      # average across sequences (batch)
-      nll_across_seq = tf.reduce_sum(mask_flat * softmax_cross_entropy) / hparams.batch_size
+      nll = tf.reduce_sum(mask_flat * softmax_cross_entropy) / num_logits
 
       correct_predictions = tf.to_float(
           tf.nn.in_top_k(logits_flat, labels_flat, 1)) * mask_flat
@@ -256,7 +256,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
 
       tf.add_to_collection('loss', loss)
       tf.add_to_collection('perplexity', perplexity)
-      tf.add_to_collection('nll_across_seq', nll_across_seq)
+      tf.add_to_collection('nll', nll)
       tf.add_to_collection('accuracy', accuracy)
       tf.add_to_collection('global_step', global_step)
 
@@ -270,7 +270,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
               'no_event_accuracy', no_event_accuracy),
           tf.summary.scalar(
               'kl_cost', tf.reduce_mean(kld)),
-          tf.summary.scalar('nll_across_seq', nll_across_seq),
+          tf.summary.scalar('nll', nll),
           tf.summary.scalar(
               'kl_weight', kl_weight)
       ]
