@@ -366,6 +366,9 @@ class EventSequenceVraeModel(mm.BaseModel):
     epsilon = np.random.normal(0, 1, np.shape(z_logvar))
     z = (z_mu + np.sqrt(np.exp(z_logvar)) * epsilon)[0]
 
+    tf.logging.info(z_mu[0])
+    tf.logging.info(z_logvar[0])
+
     event_sequences, final_state, loglik = self._generate_branches(
         event_sequences, loglik, branch_factor, first_iteration_num_steps,
         inputs, encoder_inputs, z, initial_state, temperature)

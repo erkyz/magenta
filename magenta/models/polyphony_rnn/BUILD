@@ -102,6 +102,18 @@ py_test(
 )
 
 py_binary(
+    name = "polyphony_rnn_shard_dataset",
+    srcs = ["polyphony_rnn_shard_dataset.py"],
+    visibility = ["//magenta/tools/pip:__subpackages__"],
+    deps = [
+        ":polyphony_lib",
+        ":polyphony_model",
+        "//magenta",
+        # tensorflow dep
+    ],
+)
+
+py_binary(
     name = "polyphony_rnn_create_dataset",
     srcs = ["polyphony_rnn_create_dataset.py"],
     visibility = ["//magenta/tools/pip:__subpackages__"],

@@ -90,7 +90,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
         # We only look at the hidden state of the last layer of the encoder LSTM
         encoder_final_hidden_state = encoder_final_state[-1].h
         z_mu = tf.contrib.layers.fully_connected(encoder_final_hidden_state, 
-                num_outputs=TEMP_LATENT_DIM, activation_fn=None, trainable=True)
+                num_outputs=TEMP_LATENT_DIM, activation_fn=None, trainable=True) 
         z_logvar = tf.contrib.layers.fully_connected(encoder_final_hidden_state, 
                 num_outputs=TEMP_LATENT_DIM, activation_fn=None, trainable=True)
 
@@ -123,7 +123,7 @@ def build_graph(mode, config, sequence_example_file_paths=None):
                 zero_state = decoder_cell.zero_state(hparams.batch_size, dtype=tf.float32)
                 zerostate = zero_state[0] if hparams.attn_length > 0 else zero_state
                 for c, h, in zerostate:
-                    # TODO each layer should have its own z_mu, z_logvar?
+                    # TODO each layer should have its own z_mu, z_logvar!!
                     epsilon = tf.random_normal(tf.shape(z_logvar), 0, 1, dtype=tf.float32)
                     z = z_mu + tf.mul(tf.sqrt(tf.exp(z_logvar)), epsilon)
                     hidden1 = tf.contrib.layers.fully_connected(z, 
@@ -200,7 +200,8 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       # KL weight for annealing
       # kl_weight = 0.00003*tf.tanh(0.001*(tf.cast(global_step,tf.float32)-10000.))+0.00003
       # kl_weight = 0.5*tf.tanh(0.01*(tf.cast(global_step,tf.float32)-2000.))+0.5
-      kl_weight = 0.01 + 0.000125316*tf.cast(global_step,tf.float32)
+      # kl_weight = 0.01 + 0.000125316*tf.cast(global_step,tf.float32)
+      kl_weight = 0.015
 
       # use linear annealing as in Zichao -- 1.0 at step 80K
       # kl_weight = tf.minimum(0.000012375*tf.cast(global_step,tf.float32)+0.01, 1.0)
