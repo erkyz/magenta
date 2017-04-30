@@ -20,8 +20,54 @@ from magenta.models.polyphony_rnn import polyphony_encoder_decoder
 from magenta.models.shared import events_rnn_model
 from magenta.models.shared import events_vrae_model
 
+class PolyphonyRnnModel(events_rnn_model.EventSequenceRnnModel):
+  """Class for RNN polyphonic sequence generation models."""
 
-class PolyphonyRnnModel(events_vrae_model.EventSequenceVraeModel):
+  def generate_polyphonic_sequence(
+      self, num_steps, primer_sequence, temperature=1.0, beam_size=1,
+      branch_factor=1, steps_per_iteration=1, modify_events_callback=None):
+    """Generate a polyphonic track from a primer polyphonic track.
+
+    Args:
+      num_steps: The integer length in steps of the final track, after
+          generation. Includes the primer.
+      primer_sequence: The primer sequence, a PolyphonicSequence object.
+      temperature: A float specifying how much to divide the logits by
+         before computing the softmax. Greater than 1.0 makes tracks more
+         random, less than 1.0 makes tracks less random.
+      beam_size: An integer, beam size to use when generating tracks via
+          beam search.
+      branch_factor: An integer, beam search branch factor to use.
+      steps_per_iteration: An integer, number of steps to take per beam search
+          iteration.
+      modify_events_callback: An optional callback for modifying the event list.
+          Can be used to inject events rather than having them generated. If not
+          None, will be called with 3 arguments after every event: the current
+          EventSequenceEncoderDecoder, a list of current EventSequences, and a
+          list of current encoded event inputs.
+    Returns:
+      The generated PolyphonicSequence object (which begins with the provided
+      primer track).
+    """
+    return self._generate_events(num_steps, primer_sequence, temperature,
+                                 beam_size, branch_factor, steps_per_iteration,
+                                 modify_events_callback=modify_events_callback)
+
+  def polyphonic_sequence_log_likelihood(self, sequence):
+    """Evaluate the log likelihood of a polyphonic sequence.
+
+    Args:
+      sequence: The PolyphonicSequence object for which to evaluate the log
+          likelihood.
+
+    Returns:
+      The log likelihood of `sequence` under this model.
+    """
+    return self._evaluate_log_likelihood([sequence])[0]
+
+
+
+class PolyphonyVraeModel(events_vrae_model.EventSequenceVraeModel):
   """Class for RNN polyphonic sequence generation models."""
 
   def generate_polyphonic_sequence(
@@ -80,6 +126,7 @@ default_configs = {
             dropout_keep_prob=0.5,
             skip_first_n_losses=10,
             clip_norm=5,
+            dilated_cnn=False,
             initial_learning_rate=0.001,
             decay_steps=1000,
             decay_rate=0.95)),
@@ -119,7 +166,6 @@ default_configs = {
         magenta.common.HParams(
             batch_size=128,
             rnn_layer_sizes=[128, 128],
-            output_channels=32,
             dropout_keep_prob=0.5,
             skip_first_n_losses=10,
             clip_norm=5,
@@ -131,7 +177,29 @@ default_configs = {
             dilated_cnn=True,
             anneal=None,
             residual_channels=16,
+            output_channels=32,
             block_size=7,
+            block_num=1,
+            filter_width=3)),
+
+    'cnn': events_rnn_model.EventSequenceRnnConfig(
+        magenta.protobuf.generator_pb2.GeneratorDetails(
+            id='cnn',
+            description='Polyphonic dilated CNN'),
+        magenta.music.OneHotEventSequenceEncoderDecoder(
+            polyphony_encoder_decoder.PolyphonyOneHotEncoding()),
+        magenta.common.HParams(
+            batch_size=64,
+            dropout_keep_prob=0.5,
+            skip_first_n_losses=10,
+            clip_norm=5,
+            initial_learning_rate=0.001,
+            decay_steps=1000,
+            decay_rate=0.95,
+            dilated_cnn=True,
+            residual_channels=16,
+            output_channels=32,
+            block_size=4,
             block_num=1,
             filter_width=3)),
 }

@@ -273,8 +273,11 @@ def main(unused_argv):
   config = polyphony_model.default_configs[FLAGS.config]
   config.hparams.parse(FLAGS.hparams)
 
+  model = polyphony_model.PolyphonyRnnModel(config) if config == 'polyphony' \
+          else polyphony_model.PolyphonyVraeModel(config)
+
   generator = polyphony_sequence_generator.PolyphonyRnnSequenceGenerator(
-      model=polyphony_model.PolyphonyRnnModel(config),
+      model=model,
       details=config.details,
       steps_per_quarter=FLAGS.steps_per_quarter,
       checkpoint=get_checkpoint(),

@@ -140,6 +140,7 @@ default_configs = {
                 min_note=DEFAULT_MIN_NOTE,
                 max_note=DEFAULT_MAX_NOTE)),
         magenta.common.HParams(
+            dilated_cnn=False,
             batch_size=128,
             rnn_layer_sizes=[128, 128],
             dropout_keep_prob=0.5,
@@ -158,6 +159,7 @@ default_configs = {
                 min_note=DEFAULT_MIN_NOTE,
                 max_note=DEFAULT_MAX_NOTE)),
         magenta.common.HParams(
+            dilated_cnn=False,
             batch_size=128,
             rnn_layer_sizes=[128, 128],
             dropout_keep_prob=0.5,
@@ -175,6 +177,7 @@ default_configs = {
             min_note=DEFAULT_MIN_NOTE,
             max_note=DEFAULT_MAX_NOTE),
         magenta.common.HParams(
+            dilated_cnn=False,
             batch_size=128,
             rnn_layer_sizes=[128, 128],
             dropout_keep_prob=0.5,

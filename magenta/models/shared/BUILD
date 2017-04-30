@@ -28,6 +28,7 @@ py_library(
     srcs = ["events_rnn_graph.py"],
     srcs_version = "PY2AND3",
     deps = [
+        ":events_ops",
         "//magenta",
         # tensorflow dep
     ],
@@ -50,7 +51,7 @@ py_library(
     srcs = ["events_vrae_graph.py"],
     srcs_version = "PY2AND3",
     deps = [
-        ":events_vrae_ops",
+        ":events_ops",
         "//magenta",
         # tensorflow dep
     ],
@@ -80,8 +81,8 @@ py_library(
 )
 
 py_library(
-    name = "events_vrae_ops",
-    srcs = ["events_vrae_ops.py"],
+    name = "events_ops",
+    srcs = ["events_ops.py"],
     srcs_version = "PY2AND3",
     deps = [
         # tensorflow dep
@@ -113,7 +114,7 @@ py_library(
     srcs = ["events_vrae_train.py"],
     srcs_version = "PY2AND3",
     deps = [
-        ":events_vrae_ops"
+        ":events_ops"
         # tensorflow dep
     ],
 )

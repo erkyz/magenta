@@ -15,3 +15,4 @@
 """Imports Polyphony RNN model."""
 
 from polyphony_model import PolyphonyRnnModel
+from polyphony_model import PolyphonyVraeModel

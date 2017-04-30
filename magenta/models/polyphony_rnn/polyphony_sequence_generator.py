@@ -95,7 +95,7 @@ class PolyphonyRnnSequenceGenerator(mm.BaseSequenceGenerator):
         quantized_primer_sequence, start_step=input_start_step)
     assert len(extracted_seqs) <= 1
 
-    extracted_encoder_sequence = None
+    extracted_encoder_sequence, extracted_encoder_seqs = None, None
     if encoder_sequence:
         quantized_encoder_sequence = mm.quantize_note_sequence(
             encoder_sequence, self.steps_per_quarter)
@@ -181,8 +181,12 @@ class PolyphonyRnnSequenceGenerator(mm.BaseSequenceGenerator):
       tf.logging.info(
           'Need to generate %d more steps for this sequence, will try asking '
           'for %d RNN steps' % (steps_to_gen, rnn_steps_to_gen))
-      poly_seq = self._model.generate_polyphonic_sequence(
-          len(poly_seq) + rnn_steps_to_gen, poly_seq, encoder_seq, **args)
+      if encoder_seq:
+        poly_seq = self._model.generate_polyphonic_sequence(
+              len(poly_seq) + rnn_steps_to_gen, poly_seq, encoder_seq, **args)
+      else:
+        poly_seq = self._model.generate_polyphonic_sequence(
+              len(poly_seq) + rnn_steps_to_gen, poly_seq, **args)
     poly_seq.set_length(total_steps)
 
     if generator_options.args['condition_on_primer'].bool_value:
@@ -260,8 +264,12 @@ def get_generator_map():
     bound `config` argument.
   """
   def create_sequence_generator(config, **kwargs):
-    return PolyphonyRnnSequenceGenerator(
-        polyphony_model.PolyphonyRnnModel(config), config.details, **kwargs)
+    if config == 'polyphony':
+        return PolyphonyRnnSequenceGenerator(
+            polyphony_model.PolyphonyRnnModel(config), config.details, **kwargs)
+    else:
+        return PolyphonyRnnSequenceGenerator(
+            polyphony_model.PolyphonyVraeModel(config), config.details, **kwargs)
 
   return {key: partial(create_sequence_generator, config)
           for (key, config) in polyphony_model.default_configs.items()}

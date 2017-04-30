@@ -16,7 +16,7 @@
 # internal imports
 import tensorflow as tf
 import magenta
-import magenta.models.shared.events_vrae_ops as ops
+import magenta.models.shared.events_ops as ops
 
 TEMP_HIDDEN_SIZE = 64
 TRAIN_BATCH_SIZE = 64 #TODO save properly. only for attention

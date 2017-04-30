@@ -78,11 +78,12 @@ def _create_dilation_layer(input_batch, layer_idx, dilation, global_condition_ba
             out_channels=residual_channels,
             dilation=1,
             name='conv1d_1_layer{}'.format(layer_idx))
-    conv1 = conv1 + _causal_conv(global_condition_batch,
-                        filter_width=1,
-                        out_channels=residual_channels,
-                        dilation=1,
-                        name='gc_filter_layer{}'.format(layer_idx))
+    if global_condition_batch is not None:
+        conv1 = conv1 + _causal_conv(global_condition_batch,
+                            filter_width=1,
+                            out_channels=residual_channels,
+                            dilation=1,
+                            name='gc_filter_layer{}'.format(layer_idx))
 
     # ReLU 1xk
     relu2 = tf.nn.relu(conv1, name='relu2_layer{}'.format(layer_idx))
@@ -121,11 +122,13 @@ def dilated_cnn(inputs, dilations,
     batch_size = input_shape[0]
     input_size = input_shape[2]
 
-    # TODO for completeness, include case where global_condition = None
     # [batch size, 1, 1, channels]
-    global_condition_channels = global_condition.get_shape().as_list()[1]
-    global_condition_batch = tf.reshape(
-            global_condition, [-1, 1, 1, global_condition_channels])
+    if global_condition is not None:
+        global_condition_channels = global_condition.get_shape().as_list()[1]
+        global_condition_batch = tf.reshape(
+                global_condition, [-1, 1, 1, global_condition_channels])
+    else:
+        global_condition_batch = None
 
     # Pre-process the input with a regular convolution (create causal layer)
     # Note: num_steps = in_width, input_size = in_channels. That makes sense.
@@ -143,15 +146,6 @@ def dilated_cnn(inputs, dilations,
     # TODO Use skip connections, as per Wavenet
     for i, dilation in enumerate(dilations):
         with tf.variable_scope('layer{}'.format(i)):
-            '''
-            # This padding is for generation. Not sure what it does exactly, but OK.
-            pad = initial_state[:,dlt_sum[i]*residual_channels:dlt_sum[i+1]*residual_channels]
-            pad = tf.reshape(pad,[batch_size,1,dilation,residual_channels])
-            _h = current_layer
-            h = tf.concat(2,[pad,current_layer]) # TODO correct axis?
-            _fs = tf.reshape(h[:,-dilation:,:,:],[batch_size,dilation*residual_channels])
-            final_state.append(_fs)
-            '''
             h = current_layer
 
             layer_output = _create_dilation_layer(

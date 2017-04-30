@@ -16,6 +16,7 @@
 # internal imports
 import tensorflow as tf
 import magenta
+import magenta.models.shared.events_ops as ops
 
 
 def make_rnn_cell(rnn_layer_sizes,
@@ -102,18 +103,32 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       # values to be tensors and not tuples, so state_is_tuple is set to False.
       state_is_tuple = False
 
-    cell = make_rnn_cell(hparams.rnn_layer_sizes,
-                         dropout_keep_prob=hparams.dropout_keep_prob,
-                         attn_length=hparams.attn_length,
-                         state_is_tuple=state_is_tuple)
+    if hparams.dilated_cnn:
+        dilations = [2**i for i in range(hparams.block_size)] * hparams.block_num
+        outputs, final_state = ops.dilated_cnn(inputs, 
+                dilations=dilations,
+                residual_channels=hparams.residual_channels, 
+                output_channels=hparams.output_channels,
+                filter_width=hparams.filter_width,
+                dropout_keep_prob=hparams.dropout_keep_prob,
+                mode=mode
+                )
+    else:
+        cell = make_rnn_cell(hparams.rnn_layer_sizes,
+                             dropout_keep_prob=hparams.dropout_keep_prob,
+                             attn_length=hparams.attn_length,
+                             state_is_tuple=state_is_tuple)
 
-    initial_state = cell.zero_state(hparams.batch_size, tf.float32)
+        initial_state = cell.zero_state(hparams.batch_size, tf.float32)
 
-    outputs, final_state = tf.nn.dynamic_rnn(
-        cell, inputs, initial_state=initial_state, parallel_iterations=1,
-        swap_memory=True)
+        outputs, final_state = tf.nn.dynamic_rnn(
+            cell, inputs, initial_state=initial_state, parallel_iterations=1,
+            swap_memory=True)
 
-    outputs_flat = tf.reshape(outputs, [-1, cell.output_size])
+    output_size = hparams.output_channels if hparams.dilated_cnn \
+            else cell.output_size
+
+    outputs_flat = tf.reshape(outputs, [-1, output_size])
     logits_flat = tf.contrib.layers.linear(outputs_flat, num_classes)
 
     if mode == 'train' or mode == 'eval':
