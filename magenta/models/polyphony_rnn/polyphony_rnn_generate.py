@@ -273,7 +273,7 @@ def main(unused_argv):
   config = polyphony_model.default_configs[FLAGS.config]
   config.hparams.parse(FLAGS.hparams)
 
-  model = polyphony_model.PolyphonyRnnModel(config) if config == 'polyphony' \
+  model = polyphony_model.PolyphonyRnnModel(config) if FLAGS.config == 'polyphony' or FLAGS.config == 'cnn' \
           else polyphony_model.PolyphonyVraeModel(config)
 
   generator = polyphony_sequence_generator.PolyphonyRnnSequenceGenerator(

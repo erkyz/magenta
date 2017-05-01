@@ -86,27 +86,37 @@ class EventSequenceRnnModel(mm.BaseModel):
     assert len(event_sequences) == self._config.hparams.batch_size
 
     graph_inputs = self._session.graph.get_collection('inputs')[0]
-    graph_initial_state = self._session.graph.get_collection('initial_state')[0]
-    graph_final_state = self._session.graph.get_collection('final_state')[0]
     graph_softmax = self._session.graph.get_collection('softmax')[0]
     graph_temperature = self._session.graph.get_collection('temperature')
 
-    feed_dict = {graph_inputs: inputs, graph_initial_state: initial_state}
+    if not self._config.hparams.dilated_cnn:
+    	graph_initial_state = self._session.graph.get_collection('initial_state')[0]
+	graph_final_state = self._session.graph.get_collection('final_state')[0]
+    	feed_dict = {graph_inputs: inputs, graph_initial_state: initial_state}
+    else:
+        feed_dict = {graph_inputs: inputs}
+
     # For backwards compatibility, we only try to pass temperature if the
     # placeholder exists in the graph.
     if graph_temperature:
       feed_dict[graph_temperature[0]] = temperature
-    final_state, softmax = self._session.run(
-        [graph_final_state, graph_softmax], feed_dict)
-
-    if softmax.shape[1] > 1:
-      # The inputs batch is longer than a single step, so we also want to
-      # compute the log-likelihood of the event sequences up until the step
-      # we're generating.
-      loglik = self._config.encoder_decoder.evaluate_log_likelihood(
-              event_sequences, softmax[:, :-1, :])
+    if not self._config.hparams.dilated_cnn:
+      final_state, softmax = self._session.run(
+              [graph_final_state, graph_softmax], feed_dict)
     else:
-      loglik = np.zeros(len(event_sequences))
+      final_state = None
+      softmax = self._session.run(
+              [graph_softmax], feed_dict)[0]
+
+    # TODO
+    # if softmax.shape[1] > 1:
+      # # The inputs batch is longer than a single step, so we also want to
+      # # compute the log-likelihood of the event sequences up until the step
+      # # we're generating.
+      # loglik = self._config.encoder_decoder.evaluate_log_likelihood(
+              # event_sequences, softmax[:, :-1, :])
+    # else:
+    loglik = np.zeros(len(event_sequences))
 
     indices = self._config.encoder_decoder.extend_event_sequences(
         event_sequences, softmax)
@@ -296,7 +306,8 @@ class EventSequenceRnnModel(mm.BaseModel):
       The highest-likelihood event sequence as computed by the beam search.
     """
     event_sequences = [copy.deepcopy(events) for _ in range(beam_size)]
-    graph_initial_state = self._session.graph.get_collection('initial_state')[0]
+    if not self._config.hparams.dilated_cnn:
+      graph_initial_state = self._session.graph.get_collection('initial_state')[0]
     loglik = np.zeros(beam_size)
 
     # Choose the number of steps for the first iteration such that subsequent
@@ -315,7 +326,7 @@ class EventSequenceRnnModel(mm.BaseModel):
       modify_events_callback(
           self._config.encoder_decoder, event_sequences, inputs)
 
-    initial_state = np.tile(
+    initial_state = None if self._config.hparams.dilated_cnn else np.tile(
         self._session.run(graph_initial_state), (beam_size, 1))
     event_sequences, final_state, loglik = self._generate_branches(
         event_sequences, loglik, branch_factor, first_iteration_num_steps,
@@ -433,10 +444,11 @@ class EventSequenceRnnModel(mm.BaseModel):
     graph_temperature = self._session.graph.get_collection('temperature')
 
     feed_dict = {graph_inputs: inputs, graph_initial_state: initial_state}
+    tf.logging.info(temperature)
     # For backwards compatibility, we only try to pass temperature if the
     # placeholder exists in the graph.
     if graph_temperature:
-      feed_dict[graph_temperature[0]] = 1.0
+      feed_dict[graph_temperature[0]] = temperature
     softmax = self._session.run(graph_softmax, feed_dict)
 
     return self._config.encoder_decoder.evaluate_log_likelihood(

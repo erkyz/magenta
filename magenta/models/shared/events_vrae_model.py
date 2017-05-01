@@ -100,7 +100,6 @@ class EventSequenceVraeModel(mm.BaseModel):
         feed_dict = {graph_inputs: inputs, graph_encoder_inputs: encoder_inputs, 
                 graph_z: z}
 
-
     # For backwards compatibility, we only try to pass temperature if the
     # placeholder exists in the graph.
     if graph_temperature:

@@ -181,7 +181,7 @@ class PolyphonyRnnSequenceGenerator(mm.BaseSequenceGenerator):
       tf.logging.info(
           'Need to generate %d more steps for this sequence, will try asking '
           'for %d RNN steps' % (steps_to_gen, rnn_steps_to_gen))
-      if encoder_seq:
+      if self._model._config.hparams.vrae:
         poly_seq = self._model.generate_polyphonic_sequence(
               len(poly_seq) + rnn_steps_to_gen, poly_seq, encoder_seq, **args)
       else:
@@ -264,7 +264,7 @@ def get_generator_map():
     bound `config` argument.
   """
   def create_sequence_generator(config, **kwargs):
-    if config == 'polyphony':
+    if config == 'polyphony' or config == 'cnn':
         return PolyphonyRnnSequenceGenerator(
             polyphony_model.PolyphonyRnnModel(config), config.details, **kwargs)
     else:

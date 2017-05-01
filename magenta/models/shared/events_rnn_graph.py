@@ -212,8 +212,9 @@ def build_graph(mode, config, sequence_example_file_paths=None):
       softmax = tf.reshape(softmax_flat, [hparams.batch_size, -1, num_classes])
 
       tf.add_to_collection('inputs', inputs)
-      tf.add_to_collection('initial_state', initial_state)
-      tf.add_to_collection('final_state', final_state)
+      if not hparams.dilated_cnn:
+          tf.add_to_collection('initial_state', initial_state)
+          tf.add_to_collection('final_state', final_state)
       tf.add_to_collection('temperature', temperature)
       tf.add_to_collection('softmax', softmax)
 
