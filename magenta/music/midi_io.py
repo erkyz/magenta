@@ -145,20 +145,26 @@ def midi_to_sequence_proto(midi_data):
   midi_notes = []
   midi_pitch_bends = []
   midi_control_changes = []
+  has_piano = False
   for num_instrument, midi_instrument in enumerate(midi.instruments):
-    for midi_note in midi_instrument.notes:
-      if not sequence.total_time or midi_note.end > sequence.total_time:
-        sequence.total_time = midi_note.end
-      midi_notes.append((midi_instrument.program, num_instrument,
-                         midi_instrument.is_drum, midi_note))
-    for midi_pitch_bend in midi_instrument.pitch_bends:
-      midi_pitch_bends.append(
-          (midi_instrument.program, num_instrument,
-           midi_instrument.is_drum, midi_pitch_bend))
-    for midi_control_change in midi_instrument.control_changes:
-      midi_control_changes.append(
-          (midi_instrument.program, num_instrument,
-           midi_instrument.is_drum, midi_control_change))
+    if midi_instrument.program in range(1,4) and not midi_instrument.is_drum:
+        has_piano = True
+        for midi_note in midi_instrument.notes:
+          if not sequence.total_time or midi_note.end > sequence.total_time:
+            sequence.total_time = midi_note.end
+          midi_notes.append((midi_instrument.program, num_instrument,
+                             midi_instrument.is_drum, midi_note))
+        for midi_pitch_bend in midi_instrument.pitch_bends:
+          midi_pitch_bends.append(
+              (midi_instrument.program, num_instrument,
+               midi_instrument.is_drum, midi_pitch_bend))
+        for midi_control_change in midi_instrument.control_changes:
+          midi_control_changes.append(
+              (midi_instrument.program, num_instrument,
+               midi_instrument.is_drum, midi_control_change))
+
+  if not has_piano:
+      return None
 
   for program, instrument, is_drum, midi_note in midi_notes:
     note = sequence.notes.add()
