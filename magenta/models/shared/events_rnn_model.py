@@ -343,7 +343,8 @@ class EventSequenceRnnModel(mm.BaseModel):
         inputs = self._config.encoder_decoder.get_inputs_batch(
             control_events, event_sequences)
       else:
-        inputs = self._config.encoder_decoder.get_inputs_batch(event_sequences)
+        inputs = self._config.encoder_decoder.get_inputs_batch(event_sequences,
+                full_length=True)
 
       if modify_events_callback:
         modify_events_callback(

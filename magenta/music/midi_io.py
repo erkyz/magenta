@@ -52,7 +52,6 @@ class TimeoutException(Exception):
   pass
 
 def timeout_handler(signum, frame):
-  tf.logging.info('timeout handler')
   raise TimeoutException
 
 def midi_to_sequence_proto(midi_data):
@@ -74,8 +73,6 @@ def midi_to_sequence_proto(midi_data):
     MIDIConversionError: An improper MIDI mode was supplied.
   """
 
-  signal.signal(signal.SIGALRM, timeout_handler)
-
   # In practice many MIDI files cannot be decoded with pretty_midi. Catch all
   # errors here and try to log a meaningful message. So many different
   # exceptions are raised in pretty_midi.PrettyMidi that it is cumbersome to
@@ -85,18 +82,17 @@ def midi_to_sequence_proto(midi_data):
   if isinstance(midi_data, pretty_midi.PrettyMIDI):
     midi = midi_data
   else:
-    signal.alarm(1)
     try:
       # PrettyMIDI thrashes the memory on some midi files
       signal.alarm(2)
       midi = pretty_midi.PrettyMIDI(StringIO(midi_data))
     except TimeoutException:
+      tf.logging.info('timeout handler')
       return None
     except:
-      tf.logging.info('eh')
       raise MIDIConversionError('Midi decoding error %s: %s' %
                                 (sys.exc_info()[0], sys.exc_info()[1]))
-    else:
+    finally:
       signal.alarm(0)
   # pylint: enable=bare-except
 
@@ -147,7 +143,12 @@ def midi_to_sequence_proto(midi_data):
   midi_control_changes = []
   has_piano = False
   for num_instrument, midi_instrument in enumerate(midi.instruments):
-    if midi_instrument.program in range(1,4) and not midi_instrument.is_drum:
+    # place all on same track
+    num_instrument = 0
+    # if len(midi.instruments) > 2:
+    if True:
+    # if midi_instrument.name != "":
+    # if midi_instrument.program in range(1,4) and not midi_instrument.is_drum:
         has_piano = True
         for midi_note in midi_instrument.notes:
           if not sequence.total_time or midi_note.end > sequence.total_time:
